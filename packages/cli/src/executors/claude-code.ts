@@ -227,10 +227,10 @@ export class ClaudeCodeExecutor implements Executor {
         ["-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"],
         {
           cwd,
-          shell: "/bin/zsh",
           env: {
             ...process.env,
-            PATH: `${process.env.HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:${process.env.PATH}`,
+            HOME: homedir(),
+            PATH: `${homedir()}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH ?? ""}`,
             CLAUDE_CODE_SYSTEM_PROMPT: systemPrompt,
           },
           stdio: ["pipe", "pipe", "pipe"],
