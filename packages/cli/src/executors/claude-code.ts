@@ -46,29 +46,32 @@ export class ClaudeCodeExecutor implements Executor {
 
   async execute(task: TaskPayload): Promise<ExecutionResult> {
     const start = Date.now();
+    const isReviewOnly = ["review", "answer"].includes(task.outputType);
 
     const workDir = await this.ensureRepo(task.publicRepoUrl);
-
-    // Create a working branch for this task
-    const branchName = `promptrelay/${task.id.replace(/[^a-zA-Z0-9]/g, "-")}`;
-    await this.ensureBranch(workDir, branchName);
 
     const systemPrompt = this.buildSystemPrompt(task);
     const userPrompt = this.buildUserPrompt(task);
 
-    // Run Claude Code — it will actually read and modify files
+    if (isReviewOnly) {
+      // Review/answer: just read the code and respond, no branch or PR
+      const claudeOutput = await this.runStreaming(userPrompt, systemPrompt, workDir);
+      return {
+        content: claudeOutput || "No output produced.",
+        provider: "claude-code",
+        model: "claude-sonnet-4-6",
+        durationMs: Date.now() - start,
+      };
+    }
+
+    // Code change tasks: branch, execute, commit, PR
+    const branchName = `promptrelay/${task.id.replace(/[^a-zA-Z0-9]/g, "-")}`;
+    await this.ensureBranch(workDir, branchName);
+
     const claudeOutput = await this.runStreaming(userPrompt, systemPrompt, workDir);
-
-    // Capture the actual file changes as a diff
     const diff = await this.captureDiff(workDir);
-
-    // Auto-commit the changes
     await this.commitChanges(workDir, task.title);
-
-    // Push branch and open a PR referencing the original issue
     const prUrl = await this.pushAndCreatePR(workDir, branchName, task);
-
-    // Build the result: Claude's explanation + the actual diff + PR link
     const content = this.formatResult(claudeOutput, diff, prUrl);
 
     return {
@@ -305,18 +308,61 @@ export class ClaudeCodeExecutor implements Executor {
   }
 
   private buildSystemPrompt(task: TaskPayload): string {
-    return [
-      `You are working on the open-source project "${task.projectName ?? "unknown"}".`,
-      `Task category: ${task.category}`,
-      "",
-      "IMPORTANT: You must actually create, modify, and write files to complete this task.",
-      "Do NOT just describe what you would do. Actually do it.",
-      "Read the existing code first to understand the project structure, then make the changes.",
-      "Write real, production-quality code.",
-    ].join("\n");
+    const base = `You are working on the open-source project at ${task.publicRepoUrl ?? "this repository"}.`;
+
+    const prompts: Record<string, string> = {
+      review: [
+        base,
+        "You are a senior code reviewer. Read the codebase and provide a thorough code review.",
+        "Focus on: bugs, security vulnerabilities, performance issues, code quality, and maintainability.",
+        "Structure your review with sections: Summary, Issues Found (critical/warning/info), and Recommendations.",
+        "Be specific — reference file names and line numbers. Do NOT modify any files.",
+      ].join("\n"),
+
+      docs: [
+        base,
+        "You are a technical writer. Read the codebase and generate or improve documentation.",
+        "Create or update README.md, API docs, inline JSDoc/docstrings, or usage guides as appropriate.",
+        "Write clear, concise documentation that helps new contributors get started quickly.",
+        "Actually create and write the documentation files. Do NOT just describe what you would write.",
+      ].join("\n"),
+
+      tests: [
+        base,
+        "You are a test engineer. Read the codebase and write comprehensive tests.",
+        "Identify untested code paths, edge cases, and critical functionality that needs coverage.",
+        "Use the project's existing test framework and conventions. If none exist, pick the standard one for the language.",
+        "Actually create the test files and write real, runnable tests. Do NOT just describe them.",
+      ].join("\n"),
+
+      bugfix: [
+        base,
+        "You are a debugging expert. Investigate the reported bug and implement a fix.",
+        "First reproduce/understand the issue by reading relevant code. Then implement the minimal fix.",
+        "Do NOT refactor unrelated code. Keep the change focused on the bug.",
+        "Actually modify the files to fix the bug. Do NOT just describe the fix.",
+      ].join("\n"),
+
+      refactor: [
+        base,
+        "You are a senior engineer performing a code refactoring.",
+        "Improve code structure, readability, and maintainability without changing external behavior.",
+        "Follow existing project conventions. Keep changes focused and reviewable.",
+        "Actually modify the files. Do NOT just describe what you would change.",
+      ].join("\n"),
+
+      translation: [
+        base,
+        "You are a localization specialist. Translate content as specified in the prompt.",
+        "Maintain the original formatting, structure, and technical terms where appropriate.",
+        "Actually create or modify the translation files. Do NOT just describe what you would translate.",
+      ].join("\n"),
+    };
+
+    return prompts[task.category] ?? prompts["review"];
   }
 
   private buildUserPrompt(task: TaskPayload): string {
-    return `${task.title}\n\n${task.prompt}`;
+    return task.prompt;
   }
 }

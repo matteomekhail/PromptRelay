@@ -183,6 +183,12 @@ export class Daemon {
 
     const result = await executor.execute(payload);
 
+    // For review/answer tasks, post result as a comment on the issue instead of PR
+    const commentOnlyTypes = ["review", "answer"];
+    if (commentOnlyTypes.includes(task.outputType) && task.githubIssueUrl) {
+      await this.postResultToIssue(task, result.content);
+    }
+
     await this.httpClient.mutation("tasks:complete" as any, {
       taskId: task._id,
       githubId,
@@ -194,6 +200,30 @@ export class Daemon {
 
     this.tasksCompletedToday++;
     this.callbacks.onTaskCompleted?.(task, result.durationMs);
+  }
+
+  private async postResultToIssue(task: QueuedTask, content: string): Promise<void> {
+    if (!task.githubIssueUrl) return;
+
+    const match = task.githubIssueUrl.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
+    if (!match) return;
+
+    const [, repo, issueNumber] = match;
+    const config = getConfig();
+    const token = config.githubToken;
+    if (!token) return;
+
+    const body = `## PromptRelay — ${task.category}\n\n${content}`;
+
+    await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "PromptRelay",
+      },
+      body: JSON.stringify({ body }),
+    });
   }
 
   private async filePR(task: QueuedTask): Promise<string> {
