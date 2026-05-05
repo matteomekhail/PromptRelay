@@ -15,7 +15,7 @@ import {
   getServiceStatus,
 } from "./service.js";
 
-const CONVEX_URL = "https://successful-ox-560.convex.cloud";
+const CONVEX_URL = "https://wary-caterpillar-918.convex.cloud";
 
 const arg = process.argv[2];
 
