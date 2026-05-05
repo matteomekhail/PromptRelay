@@ -22,7 +22,10 @@ export class ClaudeCodeExecutor implements Executor {
 
   async isAvailable(): Promise<boolean> {
     try {
-      await execAsync("claude --version", { shell: "/bin/zsh" });
+      await execAsync("claude --version", {
+        shell: "/bin/zsh",
+        env: { ...process.env, PATH: `${process.env.HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:${process.env.PATH}` },
+      });
       return true;
     } catch {
       return false;
@@ -214,6 +217,7 @@ export class ClaudeCodeExecutor implements Executor {
           shell: "/bin/zsh",
           env: {
             ...process.env,
+            PATH: `${process.env.HOME}/.local/bin:/usr/local/bin:/opt/homebrew/bin:${process.env.PATH}`,
             CLAUDE_CODE_SYSTEM_PROMPT: systemPrompt,
           },
           stdio: ["pipe", "pipe", "pipe"],
