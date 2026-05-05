@@ -107,15 +107,14 @@ export async function POST(req: NextRequest) {
     }
 
     // React to the comment to confirm
-    await reactToComment(repoFullName, payload.comment?.id);
-
-    await postComment(
+    const reactResult = await reactToComment(repoFullName, payload.comment?.id);
+    const commentResult = await postComment(
       repoFullName,
       payload.issue?.number ?? payload.pull_request?.number,
       `✅ Task queued — a volunteer will pick this up and run it locally.\n\n**${parsed.action}** → \`${parsed.outputType}\``
     );
 
-    return NextResponse.json({ ok: true, taskCreated: true });
+    return NextResponse.json({ ok: true, taskCreated: true, reactResult, commentResult });
   } catch (err) {
     const message = (err as Error).message;
 
@@ -175,23 +174,29 @@ Add context after the command:
 
 async function postComment(repo: string, issueNumber: number, body: string) {
   const token = process.env.GITHUB_APP_TOKEN;
-  if (!token) return;
+  if (!token) return { error: "no token" };
 
-  await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
+  const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
+      "User-Agent": "PromptRelay",
     },
     body: JSON.stringify({ body }),
   });
+  if (!res.ok) {
+    const text = await res.text();
+    return { error: `${res.status}: ${text}` };
+  }
+  return { ok: true };
 }
 
 async function reactToComment(repo: string, commentId: number) {
   const token = process.env.GITHUB_APP_TOKEN;
-  if (!token) return;
+  if (!token) return { error: "no token" };
 
-  await fetch(
+  const res = await fetch(
     `https://api.github.com/repos/${repo}/issues/comments/${commentId}/reactions`,
     {
       method: "POST",
@@ -202,4 +207,9 @@ async function reactToComment(repo: string, commentId: number) {
       body: JSON.stringify({ content: "eyes" }),
     }
   );
+  if (!res.ok) {
+    const text = await res.text();
+    return { error: `${res.status}: ${text}` };
+  }
+  return { ok: true };
 }
