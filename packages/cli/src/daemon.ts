@@ -210,12 +210,12 @@ export class Daemon {
 
     const [, repo, issueNumber] = match;
     const config = getConfig();
-    const token = config.githubToken;
+    const token = (config as any).githubPat ?? config.githubToken;
     if (!token) return;
 
     const body = `## PromptRelay — ${task.category}\n\n${content}`;
 
-    await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
+    const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -224,6 +224,10 @@ export class Daemon {
       },
       body: JSON.stringify({ body }),
     });
+
+    if (!res.ok) {
+      this.callbacks.onError?.(new Error(`Failed to post comment: ${res.status}`));
+    }
   }
 
   private async filePR(task: QueuedTask): Promise<string> {
