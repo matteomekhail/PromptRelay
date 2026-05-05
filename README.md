@@ -1,36 +1,142 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PromptRelay
 
-## Getting Started
+A volunteer AI execution network for open-source maintainers.
 
-First, run the development server:
+Maintainers submit public AI tasks (code review, docs, tests, bugfixes). Volunteers manually approve and run those tasks locally using their own AI setup. Results are sent back as answers, reviews, markdown, diffs, or PR drafts.
+
+## Stack
+
+- **Next.js 16** (App Router, TypeScript)
+- **Tailwind CSS** + **shadcn/ui** (base-ui)
+- **Convex** (database, backend functions)
+- **Auth.js v5** (NextAuth) with GitHub OAuth
+- **Zod** for form validation
+
+## Setup
+
+### Prerequisites
+
+- Node.js 18+
+- npm
+- A GitHub OAuth App
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Create a GitHub OAuth App
+
+1. Go to https://github.com/settings/developers
+2. Click "New OAuth App"
+3. Set:
+   - Application name: `PromptRelay (dev)`
+   - Homepage URL: `http://localhost:3000`
+   - Authorization callback URL: `http://localhost:3000/api/auth/callback/github`
+4. Copy the Client ID and generate a Client Secret
+
+### 3. Configure environment variables
+
+Copy `.env.example` to `.env.local` and fill in:
+
+```bash
+cp .env.example .env.local
+```
+
+Required variables:
+- `NEXT_PUBLIC_CONVEX_URL` — set by `npx convex init` or `npx convex dev`
+- `CONVEX_DEPLOYMENT` — set by Convex CLI
+- `GITHUB_CLIENT_ID` — from your GitHub OAuth App
+- `GITHUB_CLIENT_SECRET` — from your GitHub OAuth App
+- `AUTH_SECRET` — generate with `npx auth secret`
+- `NEXTAUTH_URL` — `http://localhost:3000` for local dev
+
+### 4. Start Convex
+
+In one terminal:
+
+```bash
+npx convex dev
+```
+
+### 5. Start Next.js
+
+In another terminal:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 6. Seed sample data (optional)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open the Convex dashboard and run the `seed:seedDev` mutation, or call it from a script:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npx convex run seed:seedDev
+```
 
-## Learn More
+This creates sample users (with fake GitHub IDs), projects, and queued tasks for local testing.
 
-To learn more about Next.js, take a look at the following resources:
+## Architecture
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Roles
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Maintainer** — creates projects, submits AI tasks, reviews results
+- **Volunteer** — browses queued tasks, runs them locally, submits results
 
-## Deploy on Vercel
+### Auth flow
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. User signs in with GitHub via Auth.js
+2. On first authenticated visit, the app upserts a Convex `users` record using the GitHub identity
+3. User selects a role (Maintainer or Volunteer) at `/onboarding`
+4. Role-based routing to dashboards
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Security model
+
+- No provider API keys stored on the server
+- No server-side AI execution
+- Volunteers run tasks locally using their own setup
+- Manual approval required for all tasks (locked in MVP)
+- All role checks happen via server-side Convex queries/mutations
+- GitHub identity is the only auth source
+
+### Mock AI Worker
+
+The MVP uses a deterministic mock worker (`src/lib/mock-worker.ts`) that generates realistic content based on the task's output type. No external AI APIs are called.
+
+## Routes
+
+| Route | Description |
+|-------|-------------|
+| `/` | Landing page |
+| `/onboarding` | Role selection |
+| `/maintainer` | Maintainer dashboard |
+| `/maintainer/projects/new` | Create project |
+| `/maintainer/tasks/new` | Create task |
+| `/tasks/[id]` | Task detail + results |
+| `/volunteer` | Volunteer dashboard + task queue |
+| `/volunteer/settings` | Volunteer preferences |
+
+## MVP Limitations
+
+- No real AI provider execution (mock only)
+- Single role per account
+- No GitHub PR creation (future)
+- No GitHub App integration
+- No shell command execution
+- No automatic task execution
+- Manual volunteer approval only
+- Public/open-source content only
+
+## Future Roadmap
+
+- Desktop volunteer app with real local AI execution
+- GitHub PR creation from accepted diffs
+- Maintainer reputation system
+- Volunteer reputation system
+- Project trust lists
+- Duplicate result verification
+- Multi-provider support (OpenAI, Anthropic, local models)
+- Task categories and difficulty ratings
+- Organization-level projects
