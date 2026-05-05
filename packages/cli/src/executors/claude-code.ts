@@ -20,6 +20,18 @@ export class ClaudeCodeExecutor implements Executor {
     this.onStream = cb;
   }
 
+  private async findClaudeBin(): Promise<string> {
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    const localBin = join(homedir(), ".local", "bin", "claude");
+    if (existsSync(localBin)) return localBin;
+    try {
+      const { stdout } = await execAsync("which claude", { shell: "/bin/zsh" });
+      if (stdout.trim()) return stdout.trim();
+    } catch {}
+    return "claude";
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
       await execAsync("claude --version", {
@@ -207,10 +219,11 @@ export class ClaudeCodeExecutor implements Executor {
     return result || "No output or changes produced.";
   }
 
-  private runStreaming(prompt: string, systemPrompt: string, cwd: string): Promise<string> {
+  private async runStreaming(prompt: string, systemPrompt: string, cwd: string): Promise<string> {
+    const claudeBin = await this.findClaudeBin();
     return new Promise((resolve, reject) => {
       const child = spawn(
-        "claude",
+        claudeBin,
         ["-p", prompt, "--output-format", "text", "--dangerously-skip-permissions"],
         {
           cwd,
