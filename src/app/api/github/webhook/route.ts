@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
-
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 const COMMAND_PREFIX = "/promptrelay";
 
@@ -23,6 +20,7 @@ const ACTION_MAP: Record<string, { category: ParsedCommand["category"]; outputTy
 };
 
 export async function POST(req: NextRequest) {
+  try {
   const body = await req.text();
 
   // Verify webhook signature if secret is configured
@@ -83,6 +81,8 @@ export async function POST(req: NextRequest) {
     const callerGithubId = String(payload.comment?.user?.id ?? payload.sender?.id);
     const callerGithubUsername = payload.comment?.user?.login ?? payload.sender?.login ?? "unknown";
 
+    const { ConvexHttpClient } = await import("convex/browser");
+    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
     await convex.mutation("github:createTaskFromGitHub" as any, {
       githubRepoFullName: repoFullName,
       title: `[${parsed.action}] ${issueTitle}`,
@@ -116,6 +116,9 @@ export async function POST(req: NextRequest) {
     );
 
     return NextResponse.json({ error: message }, { status: 400 });
+  }
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
 }
 
