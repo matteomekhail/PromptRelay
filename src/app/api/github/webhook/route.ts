@@ -81,20 +81,30 @@ export async function POST(req: NextRequest) {
     const callerGithubId = String(payload.comment?.user?.id ?? payload.sender?.id);
     const callerGithubUsername = payload.comment?.user?.login ?? payload.sender?.login ?? "unknown";
 
-    const { ConvexHttpClient } = await import("convex/browser");
-    const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-    await convex.mutation("github:createTaskFromGitHub" as any, {
-      githubRepoFullName: repoFullName,
-      title: `[${parsed.action}] ${issueTitle}`,
-      prompt: parsed.prompt,
-      category: parsed.category,
-      outputType: parsed.outputType,
-      priority: "normal" as const,
-      githubIssueUrl: issueUrl,
-      githubCommentId: payload.comment?.id,
-      callerGithubId,
-      callerGithubUsername,
+    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL!;
+    const mutationRes = await fetch(`${convexUrl}/api/mutation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: "github:createTaskFromGitHub",
+        args: {
+          githubRepoFullName: repoFullName,
+          title: `[${parsed.action}] ${issueTitle}`,
+          prompt: parsed.prompt,
+          category: parsed.category,
+          outputType: parsed.outputType,
+          priority: "normal",
+          githubIssueUrl: issueUrl,
+          githubCommentId: payload.comment?.id,
+          callerGithubId,
+          callerGithubUsername,
+        },
+      }),
     });
+    if (!mutationRes.ok) {
+      const err = await mutationRes.text();
+      throw new Error(err);
+    }
 
     // React to the comment to confirm
     await reactToComment(repoFullName, payload.comment?.id);
