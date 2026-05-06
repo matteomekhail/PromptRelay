@@ -1,28 +1,28 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireCurrentUser } from "./lib/auth";
+
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 
 export const listByTask = query({
-  args: { taskId: v.id("tasks") },
+  args: { taskId: v.id("tasks"), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
+
     return await ctx.db
       .query("results")
       .withIndex("by_taskId", (q) => q.eq("taskId", args.taskId))
-      .collect();
+      .take(boundedLimit(args.limit));
   },
 });
 
 export const accept = mutation({
   args: {
     resultId: v.id("results"),
-    githubId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireCurrentUser(ctx);
 
     const result = await ctx.db.get(args.resultId);
     if (!result) throw new Error("Result not found");
@@ -41,15 +41,9 @@ export const accept = mutation({
 export const reject = mutation({
   args: {
     resultId: v.id("results"),
-    githubId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireCurrentUser(ctx);
 
     const result = await ctx.db.get(args.resultId);
     if (!result) throw new Error("Result not found");
@@ -66,7 +60,12 @@ export const reject = mutation({
     await ctx.db.patch(result.taskId, {
       status: "queued",
       claimedByVolunteerId: undefined,
+      claimExpiresAt: undefined,
       updatedAt: Date.now(),
     });
   },
 });
+
+function boundedLimit(limit?: number) {
+  return Math.min(Math.max(limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+}

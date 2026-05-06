@@ -1,21 +1,25 @@
 import Conf from "conf";
 import type { ProviderConfig } from "./executors/types.js";
 
-interface VolunteerConfig {
+export interface VolunteerConfig {
   githubToken?: string;
   githubId?: string;
   githubUsername?: string;
   convexUrl: string;
+  appUrl: string;
   maxTasksPerDay: number;
   allowedCategories: string[];
   providers: ProviderConfig[];
   autoApprove: boolean;
   trustedProjects: string[];
+  githubPat?: string;
+  allowUnsafeExecution: boolean;
   idleCheckIntervalMs: number;
 }
 
 const defaults: VolunteerConfig = {
-  convexUrl: "",
+  convexUrl: process.env.PROMPTRELAY_CONVEX_URL ?? "",
+  appUrl: process.env.PROMPTRELAY_APP_URL ?? "http://localhost:3000",
   maxTasksPerDay: 10,
   allowedCategories: ["docs", "tests", "bugfix", "review", "refactor", "translation"],
   providers: [
@@ -25,6 +29,7 @@ const defaults: VolunteerConfig = {
   ],
   autoApprove: false,
   trustedProjects: [],
+  allowUnsafeExecution: process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION === "1",
   idleCheckIntervalMs: 5000,
 };
 
@@ -66,6 +71,17 @@ export function setConvexUrl(url: string): void {
   config.set("convexUrl", url);
 }
 
+export function setAppUrl(url: string): void {
+  config.set("appUrl", url);
+}
+
 export function getConfigPath(): string {
   return config.path;
+}
+
+export function isUnsafeExecutionAllowed(): boolean {
+  return (
+    config.get("allowUnsafeExecution") ||
+    process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION === "1"
+  );
 }

@@ -14,13 +14,7 @@ export function useSyncUser() {
     if (!session?.user?.githubId || synced.current) return;
 
     synced.current = true;
-    upsert({
-      githubId: session.user.githubId,
-      githubUsername: session.user.githubUsername ?? "",
-      name: session.user.name ?? undefined,
-      email: session.user.email ?? undefined,
-      avatarUrl: session.user.avatarUrl ?? session.user.image ?? undefined,
-    }).catch(() => {
+    upsert({}).catch(() => {
       synced.current = false;
     });
   }, [session, upsert]);

@@ -1,6 +1,8 @@
 import { ConvexClient } from "convex/browser";
 import { ConvexHttpClient } from "convex/browser";
+import type { FunctionReference } from "convex/server";
 import { getConfig, getEnabledProviders } from "./config.js";
+import { getConvexAuthToken } from "./convex-auth.js";
 import { selectExecutor, getExecutor } from "./executors/index.js";
 import { ClaudeCodeExecutor } from "./executors/claude-code.js";
 import type { TaskPayload } from "./executors/types.js";
@@ -24,6 +26,7 @@ interface DaemonCallbacks {
   onTaskFound?: (task: QueuedTask) => void;
   onTaskClaimed?: (task: QueuedTask) => void;
   onTaskRunning?: (task: QueuedTask, provider: string) => void;
+  onTaskPreview?: (task: QueuedTask, provider: string, command: string) => void;
   onTaskCompleted?: (task: QueuedTask, durationMs: number) => void;
   onTaskError?: (task: QueuedTask, error: Error) => void;
   onIdle?: () => void;
@@ -33,6 +36,7 @@ interface DaemonCallbacks {
 export class Daemon {
   private realtimeClient: ConvexClient;
   private httpClient: ConvexHttpClient;
+  private authToken: string | null = null;
   private running = false;
   private executing = false;
   private tasksCompletedToday = 0;
@@ -51,10 +55,19 @@ export class Daemon {
 
   async start(): Promise<void> {
     this.running = true;
+    this.realtimeClient.setAuth(
+      async () => await this.refreshAuth(),
+      (isAuthenticated) => {
+        if (!isAuthenticated) {
+          this.callbacks.onError?.(new Error("Convex authentication failed"));
+        }
+      }
+    );
+    await this.recoverStaleTasks();
 
     this.realtimeClient.onUpdate(
-      "tasks:listQueued" as any,
-      {},
+      "tasks:listQueued" as unknown as FunctionReference<"query">,
+      { limit: 100 },
       (tasks: QueuedTask[]) => {
         if (!this.running) return;
         this.handleTasksUpdate(tasks);
@@ -81,6 +94,7 @@ export class Daemon {
     if (this.executing) return;
 
     this.resetDailyCounterIfNeeded();
+    await this.recoverStaleTasks();
     const config = getConfig();
 
     if (this.tasksCompletedToday >= config.maxTasksPerDay) {
@@ -108,19 +122,15 @@ export class Daemon {
   }
 
   private async executeTask(task: QueuedTask): Promise<void> {
-    const config = getConfig();
-    const githubId = config.githubId!;
     const enabledProviders = getEnabledProviders();
 
-    await this.httpClient.mutation("tasks:claim" as any, {
+    await this.mutation("tasks:claim", {
       taskId: task._id,
-      githubId,
     });
     this.callbacks.onTaskClaimed?.(task);
 
-    await this.httpClient.mutation("tasks:markRunning" as any, {
+    await this.mutation("tasks:markRunning", {
       taskId: task._id,
-      githubId,
     });
 
     let executor = null;
@@ -146,12 +156,16 @@ export class Daemon {
     }
 
     this.callbacks.onTaskRunning?.(task, executor.displayName);
+    this.callbacks.onTaskPreview?.(
+      task,
+      executor.displayName,
+      executor.previewCommand?.(this.toPayload(task)) ?? "provider-managed execution"
+    );
 
     if (task.prompt.startsWith("__PROMPTRELAY_FILE_PR__")) {
       const prResult = await this.filePR(task);
-      await this.httpClient.mutation("tasks:complete" as any, {
+      await this.mutation("tasks:complete", {
         taskId: task._id,
-        githubId,
         content: prResult,
         executedByProvider: "promptrelay",
         executedByModel: "gh-cli",
@@ -164,24 +178,25 @@ export class Daemon {
 
     if (executor instanceof ClaudeCodeExecutor) {
       executor.setStreamCallback((content: string) => {
-        this.httpClient.mutation("tasks:updateStream" as any, {
+        this.mutation("tasks:updateStream", {
           taskId: task._id,
           content,
         }).catch(() => {});
       });
     }
 
-    const payload: TaskPayload = {
-      id: task._id,
-      title: task.title,
-      prompt: task.prompt,
-      category: task.category,
-      outputType: task.outputType,
-      publicRepoUrl: task.publicRepoUrl,
-      githubIssueUrl: task.githubIssueUrl,
-    };
+    const payload = this.toPayload(task);
 
-    const result = await executor.execute(payload);
+    let result;
+    try {
+      result = await executor.execute(payload);
+    } catch (err) {
+      await this.mutation("tasks:fail", {
+        taskId: task._id,
+        error: (err as Error).message,
+      });
+      throw err;
+    }
 
     // For review/answer tasks, post result as a comment on the issue instead of PR
     const commentOnlyTypes = ["review", "answer"];
@@ -189,9 +204,8 @@ export class Daemon {
       await this.postResultToIssue(task, result.content);
     }
 
-    await this.httpClient.mutation("tasks:complete" as any, {
+    await this.mutation("tasks:complete", {
       taskId: task._id,
-      githubId,
       content: result.content,
       executedByProvider: result.provider,
       executedByModel: result.model ?? undefined,
@@ -205,12 +219,14 @@ export class Daemon {
   private async postResultToIssue(task: QueuedTask, content: string): Promise<void> {
     if (!task.githubIssueUrl) return;
 
-    const match = task.githubIssueUrl.match(/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/);
+    const match = task.githubIssueUrl.match(
+      /github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)/
+    );
     if (!match) return;
 
     const [, repo, issueNumber] = match;
     const config = getConfig();
-    const token = (config as any).githubPat ?? config.githubToken;
+    const token = config.githubPat ?? config.githubToken;
     if (!token) return;
 
     const body = `## PromptRelay — ${task.category}\n\n${content}`;
@@ -272,8 +288,63 @@ export class Daemon {
     config: ReturnType<typeof getConfig>
   ): QueuedTask[] {
     return tasks.filter((t) =>
-      config.allowedCategories.includes(t.category)
+      config.allowedCategories.includes(t.category) &&
+      this.isTrustedTask(t, config.trustedProjects)
     );
+  }
+
+  private isTrustedTask(task: QueuedTask, trustedProjects: string[]): boolean {
+    if (trustedProjects.includes("*")) return true;
+    if (!task.publicRepoUrl) return false;
+
+    const repo = this.repoSlug(task.publicRepoUrl);
+    return trustedProjects.some((trusted) => {
+      const normalized = trusted.trim();
+      return (
+        normalized === task.publicRepoUrl ||
+        normalized === repo ||
+        this.repoSlug(normalized) === repo
+      );
+    });
+  }
+
+  private repoSlug(repoUrl: string): string | null {
+    const match = repoUrl.match(/github\.com\/([^/]+\/[^/.]+)(?:\.git)?/);
+    return match?.[1] ?? null;
+  }
+
+  private toPayload(task: QueuedTask): TaskPayload {
+    return {
+      id: task._id,
+      title: task.title,
+      prompt: task.prompt,
+      category: task.category,
+      outputType: task.outputType,
+      publicRepoUrl: task.publicRepoUrl,
+      githubIssueUrl: task.githubIssueUrl,
+    };
+  }
+
+  private async refreshAuth(): Promise<string> {
+    this.authToken = await getConvexAuthToken();
+    this.httpClient.setAuth(this.authToken);
+    return this.authToken;
+  }
+
+  private async mutation(name: string, args: Record<string, unknown>) {
+    if (!this.authToken) await this.refreshAuth();
+    return await this.httpClient.mutation(
+      name as unknown as FunctionReference<"mutation">,
+      args
+    );
+  }
+
+  private async recoverStaleTasks() {
+    try {
+      await this.mutation("tasks:recoverStaleTasks", { limit: 50 });
+    } catch (err) {
+      this.callbacks.onError?.(err as Error);
+    }
   }
 
   private pickTask(tasks: QueuedTask[]): QueuedTask {

@@ -6,11 +6,10 @@ import { api } from "../../convex/_generated/api";
 
 export function useCurrentUser() {
   const { data: session, status } = useSession();
-  const githubId = session?.user?.githubId ?? "";
 
   const user = useQuery(
-    api.users.getByGithubId,
-    githubId ? { githubId } : "skip"
+    api.users.current,
+    status === "authenticated" ? {} : "skip"
   );
 
   return {
@@ -18,6 +17,5 @@ export function useCurrentUser() {
     user,
     isLoading: status === "loading" || user === undefined,
     isAuthenticated: status === "authenticated",
-    githubId,
   };
 }

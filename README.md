@@ -51,6 +51,21 @@ Required variables:
 - `GITHUB_CLIENT_SECRET` — from your GitHub OAuth App
 - `AUTH_SECRET` — generate with `npx auth secret`
 - `NEXTAUTH_URL` — `http://localhost:3000` for local dev
+- `NEXT_PUBLIC_APP_URL` — public app URL used as the Convex auth issuer
+- `CONVEX_AUTH_PRIVATE_KEY` — RSA private key used to sign Convex auth JWTs
+
+Convex also needs the auth issuer URL in its deployment environment because
+`convex/auth.config.ts` reads it:
+
+```bash
+npx convex env set NEXT_PUBLIC_APP_URL http://localhost:3000
+```
+
+For the volunteer CLI, also set:
+
+- `PROMPTRELAY_APP_URL` — app URL that issues Convex auth tokens
+- `PROMPTRELAY_CONVEX_URL` — Convex deployment URL
+- `PROMPTRELAY_GITHUB_CLIENT_ID` — GitHub OAuth device-flow app client ID
 
 ### 4. Start Convex
 
@@ -85,25 +100,28 @@ This creates sample users (with fake GitHub IDs), projects, and queued tasks for
 - **Maintainer** — creates projects, submits AI tasks, reviews results
 - **Volunteer** — browses queued tasks, runs them locally, submits results
 
+A single account can have both roles.
+
 ### Auth flow
 
 1. User signs in with GitHub via Auth.js
-2. On first authenticated visit, the app upserts a Convex `users` record using the GitHub identity
-3. User selects a role (Maintainer or Volunteer) at `/onboarding`
-4. Role-based routing to dashboards
+2. The app exchanges the Auth.js session for a short-lived Convex JWT through `/api/convex/token`
+3. Convex validates that JWT through the app's OIDC-compatible metadata and JWKS routes
+4. On first authenticated visit, the app upserts a Convex `users` record from `ctx.auth.getUserIdentity()`
+5. User can add Maintainer and/or Volunteer roles at `/onboarding`
 
 ### Security model
 
 - No provider API keys stored on the server
 - No server-side AI execution
 - Volunteers run tasks locally using their own setup
-- Manual approval required for all tasks (locked in MVP)
-- All role checks happen via server-side Convex queries/mutations
+- The volunteer daemon only auto-executes tasks from trusted repositories
+- All role and ownership checks happen via server-side Convex identity, not client-supplied user IDs
 - GitHub identity is the only auth source
 
 ### Mock AI Worker
 
-The MVP uses a deterministic mock worker (`src/lib/mock-worker.ts`) that generates realistic content based on the task's output type. No external AI APIs are called.
+The CLI includes a deterministic mock executor (`packages/cli/src/executors/mock.ts`) that generates realistic content based on the task's output type. No external AI APIs are called when the mock executor is selected.
 
 ## Routes
 
@@ -111,22 +129,24 @@ The MVP uses a deterministic mock worker (`src/lib/mock-worker.ts`) that generat
 |-------|-------------|
 | `/` | Landing page |
 | `/onboarding` | Role selection |
-| `/maintainer` | Maintainer dashboard |
-| `/maintainer/projects/new` | Create project |
-| `/maintainer/tasks/new` | Create task |
 | `/tasks/[id]` | Task detail + results |
-| `/volunteer` | Volunteer dashboard + task queue |
-| `/volunteer/settings` | Volunteer preferences |
+
+## Volunteer CLI Settings
+
+Volunteer settings are managed from the CLI TUI:
+
+```bash
+promptrelay
+```
+
+Run the daemon explicitly with `promptrelay start`, or use
+`promptrelay --foreground` for a foreground process.
 
 ## MVP Limitations
 
-- No real AI provider execution (mock only)
-- Single role per account
-- No GitHub PR creation (future)
+- Maintainer project/task creation UI is not implemented yet
 - No GitHub App integration
-- No shell command execution
-- No automatic task execution
-- Manual volunteer approval only
+- CLI execution is restricted to trusted repositories by default
 - Public/open-source content only
 
 ## Future Roadmap

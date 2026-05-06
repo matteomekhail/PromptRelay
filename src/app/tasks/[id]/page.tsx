@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { useQuery, useMutation } from "convex/react";
 import ReactMarkdown from "react-markdown";
@@ -25,7 +25,6 @@ const statusColors: Record<string, string> = {
 
 export default function TaskDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const taskId = params.id as Id<"tasks">;
   const { data: session, status } = useSession();
   const { user } = useCurrentUser();
@@ -35,7 +34,7 @@ export default function TaskDetailPage() {
     api.projects.get,
     task ? { id: task.projectId } : "skip"
   );
-  const results = useQuery(api.results.listByTask, { taskId });
+  const results = useQuery(api.results.listByTask, { taskId, limit: 50 });
 
   const acceptResult = useMutation(api.results.accept);
   const rejectResult = useMutation(api.results.reject);
@@ -57,22 +56,21 @@ export default function TaskDetailPage() {
   const isCodeOutput = task.outputType === "diff" || task.outputType === "pr_draft";
 
   async function handleAccept(resultId: Id<"results">) {
-    if (!session?.user?.githubId) return;
-    await acceptResult({ resultId, githubId: session.user.githubId });
+    if (!session?.user) return;
+    await acceptResult({ resultId });
   }
 
   async function handleReject(resultId: Id<"results">) {
-    if (!session?.user?.githubId) return;
-    await rejectResult({ resultId, githubId: session.user.githubId });
+    if (!session?.user) return;
+    await rejectResult({ resultId });
   }
 
   async function handleFollowUp() {
-    if (!session?.user?.githubId || !replyText.trim()) return;
+    if (!session?.user || !replyText.trim()) return;
     setReplying(true);
     try {
       await followUp({
         parentTaskId: taskId,
-        githubId: session.user.githubId,
         prompt: replyText.trim(),
       });
       setReplyText("");
@@ -82,13 +80,10 @@ export default function TaskDetailPage() {
   }
 
   async function handleFilePR() {
-    if (!session?.user?.githubId) return;
+    if (!session?.user) return;
     setFilingPR(true);
     try {
-      await requestPR({
-        taskId,
-        githubId: session.user.githubId,
-      });
+      await requestPR({ taskId });
     } finally {
       setFilingPR(false);
     }

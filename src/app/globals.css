@@ -119,27 +119,6 @@
   -webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 10%, black 5%, transparent 60%);
 }
 
-/* Inline command */
-
-.relay-command {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.7rem 1rem;
-  border: 1px solid var(--border);
-  background: var(--card);
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 180ms ease;
-}
-
-.relay-command:hover {
-  border-color: var(--foreground);
-}
-
-
 @keyframes hero-fade-up {
   from {
     opacity: 0;

@@ -24,10 +24,12 @@ interface GitHubUser {
   avatar_url?: string;
 }
 
-const GITHUB_CLIENT_ID = "Ov23liEBcWb2Vush70Tr";
-
 function getClientId(): string {
-  return process.env.PROMPT_COMMONS_GITHUB_CLIENT_ID ?? GITHUB_CLIENT_ID;
+  const clientId = process.env.PROMPTRELAY_GITHUB_CLIENT_ID;
+  if (!clientId) {
+    throw new Error("PROMPTRELAY_GITHUB_CLIENT_ID is not configured.");
+  }
+  return clientId;
 }
 
 export async function loginWithDeviceFlow(): Promise<{

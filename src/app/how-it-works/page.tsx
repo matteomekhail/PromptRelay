@@ -17,12 +17,13 @@ export default function HowItWorksPage() {
             1. Volunteer installs the CLI daemon
           </h2>
           <p className="mt-3 text-muted-foreground">
-            A volunteer runs{" "}
+            A volunteer opens the settings TUI, authenticates via GitHub OAuth,
+            and configures their local daemon. The daemon is started explicitly with{" "}
             <code className="text-foreground font-mono text-[13px]">
-              npx @promptrelay/volunteer
-            </code>{" "}
-            to authenticate via GitHub OAuth and start a background daemon.
-            The daemon polls Convex for queued tasks matching the volunteer's
+              promptrelay start
+            </code>
+            .
+            The daemon polls Convex for queued tasks matching the volunteer&apos;s
             allowed categories (docs, tests, bugfix, review, refactor,
             translation). Configuration lives in{" "}
             <code className="text-foreground font-mono text-[13px]">
@@ -104,9 +105,9 @@ export default function HowItWorksPage() {
             5. What stays local
           </h2>
           <p className="mt-3 text-muted-foreground">
-            API keys, model access, and compute are the volunteer's. The
+            API keys, model access, and compute are the volunteer&apos;s. The
             platform stores task metadata, prompts, and results in Convex.
-            No credentials cross the network. The volunteer's daemon controls
+            No credentials cross the network. The volunteer&apos;s daemon controls
             what it runs: category filters, daily limits, manual approval
             mode, and a trusted-projects allowlist.
           </p>

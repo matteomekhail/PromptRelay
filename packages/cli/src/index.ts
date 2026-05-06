@@ -1,21 +1,22 @@
+#!/usr/bin/env node
 import chalk from "chalk";
 import ora from "ora";
+import type { FunctionReference } from "convex/server";
 import { loginWithDeviceFlow } from "./auth.js";
 import {
   getConfig,
   setConvexUrl,
+  setAppUrl,
   isAuthenticated,
-  getEnabledProviders,
 } from "./config.js";
 import { detectAvailableProviders } from "./executors/index.js";
 import { Daemon } from "./daemon.js";
+import { runSettingsTui } from "./settings-tui.js";
 import {
   installService,
   uninstallService,
   getServiceStatus,
 } from "./service.js";
-
-const CONVEX_URL = "https://wary-caterpillar-918.convex.cloud";
 
 const arg = process.argv[2];
 
@@ -46,6 +47,17 @@ async function main() {
     return;
   }
 
+  if (!arg || arg === "settings" || arg === "config") {
+    await runSettingsTui();
+    return;
+  }
+
+  if (arg !== "start" && arg !== "--foreground") {
+    console.log(chalk.red(`\n  Unknown command: ${arg}\n`));
+    console.log(chalk.dim("  Usage: promptrelay [settings|start|--foreground|status|logs|stop]\n"));
+    process.exit(1);
+  }
+
   // ─── Main flow ─────────────────────────────────────────────────────────────
 
   console.log(chalk.dim("\n  ┌─────────────────────────────────────────┐"));
@@ -53,8 +65,16 @@ async function main() {
   console.log(chalk.dim("  └─────────────────────────────────────────┘\n"));
 
   // Ensure Convex URL
+  const envConvexUrl = process.env.PROMPTRELAY_CONVEX_URL;
+  const envAppUrl = process.env.PROMPTRELAY_APP_URL;
+  if (envConvexUrl) {
+    setConvexUrl(envConvexUrl);
+  }
+  if (envAppUrl) {
+    setAppUrl(envAppUrl);
+  }
   if (!getConfig().convexUrl) {
-    setConvexUrl(CONVEX_URL);
+    throw new Error("PROMPTRELAY_CONVEX_URL is not configured.");
   }
 
   // Auth
@@ -74,7 +94,7 @@ async function main() {
 
   // Register as volunteer
   const config = getConfig();
-  await ensureVolunteerRole(config.githubId!);
+  await ensureVolunteerRole();
 
   // Detect providers
   const spinner = ora("  Detecting AI providers...").start();
@@ -101,7 +121,7 @@ async function main() {
 
   try {
     await installService();
-    const status = await getServiceStatus();
+    await getServiceStatus();
 
     console.log(chalk.green("  ✓ Daemon installed and running in background.\n"));
     console.log(chalk.dim("  It will:"));
@@ -110,6 +130,7 @@ async function main() {
     console.log(chalk.dim("    • Execute using your local AI tools\n"));
     console.log(`  ${chalk.dim("Logs:")}    promptrelay logs`);
     console.log(`  ${chalk.dim("Status:")}  promptrelay status`);
+    console.log(`  ${chalk.dim("Config:")}  promptrelay`);
     console.log(`  ${chalk.dim("Stop:")}    promptrelay stop`);
     console.log();
   } catch (err) {
@@ -131,6 +152,9 @@ async function runForeground() {
     },
     onTaskRunning: (task, provider) => {
       log(`${chalk.magenta("▶")} Running (${provider}): ${task.title}`);
+    },
+    onTaskPreview: (_task, _provider, command) => {
+      log(`${chalk.dim("preview:")} ${command}`);
     },
     onTaskCompleted: (task, durationMs) => {
       log(`${chalk.green("✓")} Done: ${task.title} (${(durationMs / 1000).toFixed(1)}s)`);
@@ -161,18 +185,19 @@ function log(msg: string) {
   console.log(`  ${chalk.dim(ts)} ${msg}`);
 }
 
-async function ensureVolunteerRole(githubId: string): Promise<void> {
+async function ensureVolunteerRole(): Promise<void> {
   const { ConvexHttpClient } = await import("convex/browser");
-  const client = new ConvexHttpClient(CONVEX_URL);
+  const { getConvexAuthToken } = await import("./convex-auth.js");
+  const config = getConfig();
+  const token = await getConvexAuthToken();
+  const client = new ConvexHttpClient(config.convexUrl, { auth: token });
 
   try {
-    const config = getConfig();
-    await client.mutation("users:upsertFromGitHub" as any, {
-      githubId,
-      githubUsername: config.githubUsername ?? "",
-    });
-    await client.mutation("users:setRole" as any, {
-      githubId,
+    await client.mutation(
+      "users:upsertFromGitHub" as unknown as FunctionReference<"mutation">,
+      {}
+    );
+    await client.mutation("users:setRole" as unknown as FunctionReference<"mutation">, {
       role: "VOLUNTEER",
     });
   } catch {

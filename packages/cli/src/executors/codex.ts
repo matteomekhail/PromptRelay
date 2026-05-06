@@ -5,6 +5,7 @@ import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Executor, TaskPayload, ExecutionResult } from "./types.js";
+import { isUnsafeExecutionAllowed } from "../config.js";
 
 const execAsync = promisify(exec);
 
@@ -23,6 +24,12 @@ export class CodexExecutor implements Executor {
     }
   }
 
+  previewCommand(): string {
+    return isUnsafeExecutionAllowed()
+      ? "codex --quiet --approval-mode full-auto <prompt>"
+      : "codex --quiet <prompt>";
+  }
+
   async execute(task: TaskPayload): Promise<ExecutionResult> {
     const start = Date.now();
 
@@ -35,7 +42,7 @@ export class CodexExecutor implements Executor {
 
     try {
       const { stdout } = await execAsync(
-        `codex --quiet --approval-mode full-auto '${escapedPrompt}'`,
+        `${this.codexCommand()} '${escapedPrompt}'`,
         {
           cwd: workDir,
           timeout: 300_000,
@@ -78,6 +85,7 @@ export class CodexExecutor implements Executor {
     const localPath = join(REPOS_DIR, repoSlug.replace("/", "__"));
 
     if (existsSync(join(localPath, ".git"))) {
+      await this.assertCleanWorktree(localPath);
       try {
         await execAsync("git checkout main 2>/dev/null || git checkout master", {
           cwd: localPath, shell: "/bin/zsh", timeout: 30_000,
@@ -86,9 +94,7 @@ export class CodexExecutor implements Executor {
           cwd: localPath, shell: "/bin/zsh", timeout: 60_000,
         });
       } catch {
-        await execAsync("git fetch origin && git reset --hard origin/HEAD", {
-          cwd: localPath, shell: "/bin/zsh", timeout: 60_000,
-        });
+        throw new Error("Could not update repository with a fast-forward pull.");
       }
     } else {
       await execAsync(`git clone '${repoUrl}' '${localPath}'`, {
@@ -115,6 +121,24 @@ export class CodexExecutor implements Executor {
           cwd: workDir, shell: "/bin/zsh",
         });
       } catch {}
+    }
+  }
+
+  private codexCommand(): string {
+    return isUnsafeExecutionAllowed()
+      ? "codex --quiet --approval-mode full-auto"
+      : "codex --quiet";
+  }
+
+  private async assertCleanWorktree(workDir: string): Promise<void> {
+    const { stdout } = await execAsync("git status --porcelain", {
+      cwd: workDir,
+      shell: "/bin/zsh",
+    });
+    if (stdout.trim()) {
+      throw new Error(
+        "Repository worktree is not clean. Commit, stash, or remove local changes before PromptRelay runs."
+      );
     }
   }
 

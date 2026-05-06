@@ -8,6 +8,10 @@ export class MockExecutor implements Executor {
     return true;
   }
 
+  previewCommand(): string {
+    return "mock executor (no external command)";
+  }
+
   async execute(task: TaskPayload): Promise<ExecutionResult> {
     const start = Date.now();
 
@@ -54,7 +58,7 @@ export class MockExecutor implements Executor {
   }
 
   private diff(task: TaskPayload): string {
-    return `diff --git a/src/handler.ts b/src/handler.ts\nindex 1a2b3c4..5e6f7g8 100644\n--- a/src/handler.ts\n+++ b/src/handler.ts\n@@ -1,6 +1,10 @@\n+import { validate } from './utils/validate';\n+\n export async function handle(input: unknown) {\n-  const data = input as Record<string, unknown>;\n+  const data = validate(input);\n+  if (!data) {\n+    throw new Error('Invalid input');\n+  }\n   const result = await process(data);\n-  return result;\n+  return { success: true, data: result, timestamp: Date.now() };\n }`;
+    return `diff --git a/src/handler.ts b/src/handler.ts\nindex 1a2b3c4..5e6f7g8 100644\n--- a/src/handler.ts\n+++ b/src/handler.ts\n@@ -1,6 +1,10 @@\n+import { validate } from './utils/validate';\n+\n export async function handle(input: unknown) {\n-  const data = input as Record<string, unknown>;\n+  const data = validate(input);\n+  if (!data) {\n+    throw new Error('Invalid input');\n+  }\n   const result = await process(data);\n-  return result;\n+  return { success: true, data: result, timestamp: Date.now() };\n }\n+\n+// Generated for task: ${task.title}`;
   }
 
   private prDraft(task: TaskPayload): string {

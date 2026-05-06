@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
 import { useMutation } from "convex/react";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SyncUser } from "@/components/sync-user";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -23,21 +22,19 @@ export default function OnboardingPage() {
   }, [status]);
 
   useEffect(() => {
-    if (user?.role === "MAINTAINER") {
-      router.push("/tasks");
-    } else if (user?.role === "VOLUNTEER") {
-      router.push("/volunteer");
+    if (user?.roles?.includes("VOLUNTEER")) {
+      router.push("/");
     }
   }, [user, router]);
 
-  if (!session || user?.role) {
+  if (!session) {
     return null;
   }
 
   async function handleSelectRole(role: "MAINTAINER" | "VOLUNTEER") {
-    if (!session?.user?.githubId) return;
-    await setRole({ githubId: session.user.githubId, role });
-    router.push(role === "MAINTAINER" ? "/tasks" : "/volunteer");
+    if (!session?.user) return;
+    await setRole({ role });
+    router.push("/");
   }
 
   return (
@@ -77,7 +74,7 @@ export default function OnboardingPage() {
           </Card>
         </div>
         <p className="text-xs text-muted-foreground text-center mt-6">
-          You can only choose one role per account in the MVP.
+          You can add both roles to the same account.
         </p>
       </div>
     </>

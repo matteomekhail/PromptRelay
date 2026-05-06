@@ -3,15 +3,19 @@ import { v } from "convex/values";
 
 export default defineSchema({
   users: defineTable({
+    tokenIdentifier: v.optional(v.string()),
     githubId: v.string(),
     githubUsername: v.string(),
     name: v.optional(v.string()),
     email: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
     role: v.optional(v.union(v.literal("MAINTAINER"), v.literal("VOLUNTEER"))),
+    roles: v.optional(v.array(v.union(v.literal("MAINTAINER"), v.literal("VOLUNTEER")))),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_githubId", ["githubId"]),
+  })
+    .index("by_githubId", ["githubId"])
+    .index("by_tokenIdentifier", ["tokenIdentifier"]),
 
   projects: defineTable({
     name: v.string(),
@@ -56,7 +60,8 @@ export default defineSchema({
       v.literal("claimed"),
       v.literal("running"),
       v.literal("completed"),
-      v.literal("rejected")
+      v.literal("rejected"),
+      v.literal("failed")
     ),
     publicRepoUrl: v.optional(v.string()),
     githubIssueUrl: v.optional(v.string()),
@@ -64,6 +69,9 @@ export default defineSchema({
     preferredProvider: v.optional(v.string()),
     preferredModel: v.optional(v.string()),
     claimedByVolunteerId: v.optional(v.id("users")),
+    claimExpiresAt: v.optional(v.number()),
+    attempts: v.optional(v.number()),
+    failedReason: v.optional(v.string()),
     streamingContent: v.optional(v.string()),
     executedByProvider: v.optional(v.string()),
     executedByModel: v.optional(v.string()),
@@ -73,6 +81,7 @@ export default defineSchema({
   })
     .index("by_maintainerId", ["maintainerId"])
     .index("by_status", ["status"])
+    .index("by_status_and_claimExpiresAt", ["status", "claimExpiresAt"])
     .index("by_projectId", ["projectId"]),
 
   volunteerSettings: defineTable({

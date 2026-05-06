@@ -1,46 +1,56 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { requireCurrentUser, requireRole } from "./lib/auth";
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+const RESULTS_CONTEXT_LIMIT = 20;
+const CLAIM_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_TASK_ATTEMPTS = 3;
+
+const categoryValidator = v.union(
+  v.literal("docs"),
+  v.literal("tests"),
+  v.literal("bugfix"),
+  v.literal("review"),
+  v.literal("refactor"),
+  v.literal("translation")
+);
+
+const outputTypeValidator = v.union(
+  v.literal("answer"),
+  v.literal("review"),
+  v.literal("markdown"),
+  v.literal("diff"),
+  v.literal("pr_draft")
+);
+
+const priorityValidator = v.union(
+  v.literal("low"),
+  v.literal("normal"),
+  v.literal("high")
+);
 
 export const create = mutation({
   args: {
     projectId: v.id("projects"),
-    githubId: v.string(),
     title: v.string(),
     prompt: v.string(),
-    category: v.union(
-      v.literal("docs"),
-      v.literal("tests"),
-      v.literal("bugfix"),
-      v.literal("review"),
-      v.literal("refactor"),
-      v.literal("translation")
-    ),
-    outputType: v.union(
-      v.literal("answer"),
-      v.literal("review"),
-      v.literal("markdown"),
-      v.literal("diff"),
-      v.literal("pr_draft")
-    ),
-    priority: v.union(
-      v.literal("low"),
-      v.literal("normal"),
-      v.literal("high")
-    ),
+    category: categoryValidator,
+    outputType: outputTypeValidator,
+    priority: priorityValidator,
     publicRepoUrl: v.optional(v.string()),
     preferredProvider: v.optional(v.string()),
     preferredModel: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireRole(ctx, "MAINTAINER");
 
     const project = await ctx.db.get(args.projectId);
     if (!project) throw new Error("Project not found");
+    if (project.maintainerId !== user._id) throw new Error("Not your project");
 
     const now = Date.now();
     return await ctx.db.insert("tasks", {
@@ -55,6 +65,7 @@ export const create = mutation({
       publicRepoUrl: args.publicRepoUrl,
       preferredProvider: args.preferredProvider,
       preferredModel: args.preferredModel,
+      attempts: 0,
       createdAt: now,
       updatedAt: now,
     });
@@ -62,45 +73,43 @@ export const create = mutation({
 });
 
 export const listByMaintainer = query({
-  args: { githubId: v.string() },
+  args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) return [];
+    const user = await requireCurrentUser(ctx);
 
     return await ctx.db
       .query("tasks")
       .withIndex("by_maintainerId", (q) => q.eq("maintainerId", user._id))
-      .collect();
+      .take(boundedLimit(args.limit));
   },
 });
 
 export const listByProject = query({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
     return await ctx.db
       .query("tasks")
       .withIndex("by_projectId", (q) => q.eq("projectId", args.projectId))
-      .collect();
+      .take(boundedLimit(args.limit));
   },
 });
 
 export const listQueued = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
     return await ctx.db
       .query("tasks")
       .withIndex("by_status", (q) => q.eq("status", "queued"))
-      .collect();
+      .take(boundedLimit(args.limit));
   },
 });
 
 export const get = query({
   args: { id: v.id("tasks") },
   handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
     return await ctx.db.get(args.id);
   },
 });
@@ -108,24 +117,26 @@ export const get = query({
 export const claim = mutation({
   args: {
     taskId: v.id("tasks"),
-    githubId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
-    if (user.role !== "VOLUNTEER") throw new Error("Not a volunteer");
+    const user = await requireRole(ctx, "VOLUNTEER");
 
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Task not found");
     if (task.status !== "queued") throw new Error("Task is not queued");
 
+    const attempts = (task.attempts ?? 0) + 1;
+    if (attempts > MAX_TASK_ATTEMPTS) {
+      await markTaskFailed(ctx, task._id, "Maximum retry attempts exceeded");
+      throw new Error("Task retry limit exceeded");
+    }
+
     await ctx.db.patch(args.taskId, {
       status: "claimed",
       claimedByVolunteerId: user._id,
+      claimExpiresAt: Date.now() + CLAIM_TIMEOUT_MS,
+      attempts,
+      failedReason: undefined,
       updatedAt: Date.now(),
     });
   },
@@ -134,15 +145,9 @@ export const claim = mutation({
 export const markRunning = mutation({
   args: {
     taskId: v.id("tasks"),
-    githubId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireCurrentUser(ctx);
 
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Task not found");
@@ -151,6 +156,7 @@ export const markRunning = mutation({
 
     await ctx.db.patch(args.taskId, {
       status: "running",
+      claimExpiresAt: Date.now() + CLAIM_TIMEOUT_MS,
       updatedAt: Date.now(),
     });
   },
@@ -159,23 +165,20 @@ export const markRunning = mutation({
 export const complete = mutation({
   args: {
     taskId: v.id("tasks"),
-    githubId: v.string(),
     content: v.string(),
     executedByProvider: v.optional(v.string()),
     executedByModel: v.optional(v.string()),
     executionDurationMs: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireCurrentUser(ctx);
 
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Task not found");
     if (task.claimedByVolunteerId !== user._id) throw new Error("Not your task");
+    if (task.status !== "running" && task.status !== "claimed") {
+      throw new Error("Task is not active");
+    }
 
     const now = Date.now();
 
@@ -190,11 +193,29 @@ export const complete = mutation({
 
     await ctx.db.patch(args.taskId, {
       status: "completed",
+      claimExpiresAt: undefined,
+      failedReason: undefined,
+      streamingContent: undefined,
       executedByProvider: args.executedByProvider,
       executedByModel: args.executedByModel,
       executionDurationMs: args.executionDurationMs,
       updatedAt: now,
     });
+  },
+});
+
+export const fail = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    error: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.claimedByVolunteerId !== user._id) throw new Error("Not your task");
+
+    await retryOrFail(ctx, task, args.error);
   },
 });
 
@@ -204,8 +225,15 @@ export const updateStream = mutation({
     content: v.string(),
   },
   handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.claimedByVolunteerId !== user._id) throw new Error("Not your task");
+
     await ctx.db.patch(args.taskId, {
       streamingContent: args.content,
+      claimExpiresAt: Date.now() + CLAIM_TIMEOUT_MS,
+      updatedAt: Date.now(),
     });
   },
 });
@@ -213,25 +241,19 @@ export const updateStream = mutation({
 export const followUp = mutation({
   args: {
     parentTaskId: v.id("tasks"),
-    githubId: v.string(),
     prompt: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireCurrentUser(ctx);
 
     const parent = await ctx.db.get(args.parentTaskId);
     if (!parent) throw new Error("Task not found");
+    if (parent.maintainerId !== user._id) throw new Error("Not your task");
 
-    // Get previous results to build conversation context
     const previousResults = await ctx.db
       .query("results")
       .withIndex("by_taskId", (q) => q.eq("taskId", args.parentTaskId))
-      .collect();
+      .take(RESULTS_CONTEXT_LIMIT);
 
     const conversationContext = previousResults
       .map((r) => `### Previous result:\n${r.content}`)
@@ -240,11 +262,12 @@ export const followUp = mutation({
     const fullPrompt = `${parent.prompt}\n\n${conversationContext}\n\n### Follow-up:\n${args.prompt}`;
 
     const now = Date.now();
-    // Requeue the parent task with the follow-up prompt so it continues on the same branch
     await ctx.db.patch(args.parentTaskId, {
       status: "queued",
       prompt: fullPrompt,
       claimedByVolunteerId: undefined,
+      claimExpiresAt: undefined,
+      failedReason: undefined,
       streamingContent: undefined,
       executedByProvider: undefined,
       executedByModel: undefined,
@@ -252,29 +275,21 @@ export const followUp = mutation({
       updatedAt: now,
     });
 
-    const newTaskId = args.parentTaskId;
-
-    return newTaskId;
+    return args.parentTaskId;
   },
 });
 
 export const requestPR = mutation({
   args: {
     taskId: v.id("tasks"),
-    githubId: v.string(),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
+    const user = await requireCurrentUser(ctx);
 
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Task not found");
+    if (task.maintainerId !== user._id) throw new Error("Not your task");
 
-    // Create a special "pr" task that tells the daemon to push and open a PR
     const now = Date.now();
     await ctx.db.insert("tasks", {
       projectId: task.projectId,
@@ -288,8 +303,76 @@ export const requestPR = mutation({
       publicRepoUrl: task.publicRepoUrl,
       parentTaskId: task._id,
       preferredProvider: task.preferredProvider,
+      attempts: 0,
       createdAt: now,
       updatedAt: now,
     });
   },
 });
+
+export const recoverStaleTasks = mutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
+    const now = Date.now();
+    const limit = boundedLimit(args.limit);
+    const claimed = await recoverStaleByStatus(ctx, "claimed", now, limit);
+    const running = await recoverStaleByStatus(ctx, "running", now, limit);
+    return { recovered: claimed + running };
+  },
+});
+
+async function recoverStaleByStatus(
+  ctx: MutationCtx,
+  status: "claimed" | "running",
+  now: number,
+  limit: number
+) {
+  const staleTasks = await ctx.db
+    .query("tasks")
+    .withIndex("by_status_and_claimExpiresAt", (q) =>
+      q.eq("status", status).lt("claimExpiresAt", now)
+    )
+    .take(limit);
+
+  for (const task of staleTasks) {
+    await retryOrFail(ctx, task, "Claim expired before completion");
+  }
+
+  return staleTasks.length;
+}
+
+async function retryOrFail(ctx: MutationCtx, task: Doc<"tasks">, reason: string) {
+  if ((task.attempts ?? 0) >= MAX_TASK_ATTEMPTS) {
+    await markTaskFailed(ctx, task._id, reason);
+    return;
+  }
+
+  await ctx.db.patch(task._id, {
+    status: "queued",
+    claimedByVolunteerId: undefined,
+    claimExpiresAt: undefined,
+    failedReason: reason,
+    streamingContent: undefined,
+    updatedAt: Date.now(),
+  });
+}
+
+async function markTaskFailed(
+  ctx: MutationCtx,
+  taskId: Id<"tasks">,
+  reason: string
+) {
+  await ctx.db.patch(taskId, {
+    status: "failed",
+    claimedByVolunteerId: undefined,
+    claimExpiresAt: undefined,
+    failedReason: reason,
+    streamingContent: undefined,
+    updatedAt: Date.now(),
+  });
+}
+
+function boundedLimit(limit?: number) {
+  return Math.min(Math.max(limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+}

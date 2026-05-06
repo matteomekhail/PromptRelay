@@ -52,7 +52,7 @@ export const createTaskFromGitHub = mutation({
         const userId = await ctx.db.insert("users", {
           githubId: args.callerGithubId,
           githubUsername: args.callerGithubUsername,
-          role: "MAINTAINER",
+          roles: ["MAINTAINER"],
           createdAt: now,
           updatedAt: now,
         });
@@ -81,6 +81,7 @@ export const createTaskFromGitHub = mutation({
       status: "queued",
       publicRepoUrl: `https://github.com/${args.githubRepoFullName}`,
       githubIssueUrl: args.githubIssueUrl,
+      attempts: 0,
       createdAt: now,
       updatedAt: now,
     });

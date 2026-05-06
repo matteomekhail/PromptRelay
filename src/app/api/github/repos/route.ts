@@ -1,6 +1,17 @@
 import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
+type GitHubRepo = {
+  id: number;
+  full_name: string;
+  name: string;
+  description: string | null;
+  html_url: string;
+  private: boolean;
+  language: string | null;
+  updated_at: string;
+};
+
 export async function GET() {
   const session = await auth();
 
@@ -22,9 +33,9 @@ export async function GET() {
     return NextResponse.json({ error: "GitHub API error" }, { status: res.status });
   }
 
-  const repos = await res.json();
+  const repos = (await res.json()) as GitHubRepo[];
 
-  const simplified = repos.map((r: any) => ({
+  const simplified = repos.map((r) => ({
     id: r.id,
     fullName: r.full_name,
     name: r.name,

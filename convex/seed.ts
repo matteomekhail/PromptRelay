@@ -11,7 +11,7 @@ export const seedDev = mutation({
       name: "Demo Maintainer",
       email: "maintainer@example.com",
       avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4",
-      role: "MAINTAINER",
+      roles: ["MAINTAINER"],
       createdAt: now,
       updatedAt: now,
     });
@@ -22,7 +22,7 @@ export const seedDev = mutation({
       name: "Demo Volunteer",
       email: "volunteer@example.com",
       avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4",
-      role: "VOLUNTEER",
+      roles: ["VOLUNTEER"],
       createdAt: now,
       updatedAt: now,
     });
@@ -54,6 +54,7 @@ export const seedDev = mutation({
       outputType: "diff",
       priority: "high",
       status: "queued",
+      attempts: 0,
       publicRepoUrl: "https://github.com/example/open-relay",
       createdAt: now,
       updatedAt: now,
@@ -69,6 +70,7 @@ export const seedDev = mutation({
       outputType: "review",
       priority: "normal",
       status: "queued",
+      attempts: 0,
       publicRepoUrl: "https://github.com/example/open-relay",
       createdAt: now,
       updatedAt: now,
@@ -84,6 +86,7 @@ export const seedDev = mutation({
       outputType: "markdown",
       priority: "normal",
       status: "queued",
+      attempts: 0,
       createdAt: now,
       updatedAt: now,
     });
@@ -98,6 +101,7 @@ export const seedDev = mutation({
       outputType: "pr_draft",
       priority: "high",
       status: "queued",
+      attempts: 0,
       createdAt: now,
       updatedAt: now,
     });

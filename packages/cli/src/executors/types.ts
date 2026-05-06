@@ -21,6 +21,7 @@ export interface Executor {
   name: string;
   displayName: string;
   isAvailable(): Promise<boolean>;
+  previewCommand?(task: TaskPayload): string;
   execute(task: TaskPayload): Promise<ExecutionResult>;
 }
 

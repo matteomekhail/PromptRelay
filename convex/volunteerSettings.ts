@@ -1,15 +1,11 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireCurrentUser, requireRole } from "./lib/auth";
 
 export const get = query({
-  args: { githubId: v.string() },
-  handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) return null;
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
 
     return await ctx.db
       .query("volunteerSettings")
@@ -20,19 +16,12 @@ export const get = query({
 
 export const upsert = mutation({
   args: {
-    githubId: v.string(),
     maxTasksPerDay: v.number(),
     allowedCategories: v.array(v.string()),
     trustedProjects: v.array(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_githubId", (q) => q.eq("githubId", args.githubId))
-      .unique();
-
-    if (!user) throw new Error("User not found");
-    if (user.role !== "VOLUNTEER") throw new Error("Not a volunteer");
+    const user = await requireRole(ctx, "VOLUNTEER");
 
     const existing = await ctx.db
       .query("volunteerSettings")
