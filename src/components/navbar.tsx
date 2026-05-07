@@ -1,8 +1,8 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -22,14 +22,7 @@ export function Navbar() {
           href="/"
           className="flex items-center gap-2 text-sm font-semibold"
         >
-          <Image
-            src="/brand/promptrelay-mark.png"
-            alt=""
-            aria-hidden="true"
-            width={28}
-            height={28}
-            className="size-7 object-contain"
-          />
+          <BrandMark className="size-7" decorative />
           <span className="font-heading">PromptRelay</span>
         </Link>
 

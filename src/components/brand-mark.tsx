@@ -1,43 +1,27 @@
 import { cn } from "@/lib/utils";
 
-export function BrandMark({ className }: { className?: string }) {
+export function BrandMark({
+  className,
+  decorative = false,
+}: {
+  className?: string;
+  decorative?: boolean;
+}) {
   return (
     <svg
       viewBox="0 0 48 48"
-      role="img"
-      aria-label="PromptRelay"
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : "PromptRelay"}
+      aria-hidden={decorative ? true : undefined}
       className={cn("size-8", className)}
-      fill="none"
     >
-      <rect
-        x="8"
-        y="13"
-        width="32"
-        height="22"
-        rx="4"
-        stroke="currentColor"
-        strokeWidth="3"
-      />
       <path
-        d="M10 15.5 24 26l14-10.5"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        fill="currentColor"
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M8 12h9.25L30 24 17.25 36H8l12.25-12L8 12Zm8.15 5.65h2.55L25.38 24 18.7 30.35h-2.55L22.85 24l-6.7-6.35Z"
       />
-      <path
-        d="M4 18h8M4 30h8M36 18h8M36 30h8"
-        stroke="oklch(0.814138 0.039715 188.343)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-      />
-      <path
-        d="M16 35 24 26l8 9"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <rect x="33.5" y="12" width="6.5" height="24" rx="1.25" fill="currentColor" />
     </svg>
   );
 }
