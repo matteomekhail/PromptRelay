@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Executor, TaskPayload, ExecutionResult } from "./types.js";
 import { isUnsafeExecutionAllowed } from "../config.js";
+import { commitAndOpenForkPullRequest } from "./github-pr.js";
 
 const execAsync = promisify(exec);
 
@@ -67,7 +68,9 @@ export class ClaudeCodeExecutor implements Executor {
     const claudeOutput = await this.runStreaming(userPrompt, systemPrompt, workDir);
     const diff = await this.captureDiff(workDir);
     const hasChanges = diff !== "(no file changes)";
-    const prUrl = hasChanges ? await this.commitAndPushPR(workDir, branchName, task) : null;
+    const prUrl = hasChanges
+      ? await commitAndOpenForkPullRequest({ workDir, branchName, task })
+      : null;
     const content = this.formatResult(claudeOutput, diff, prUrl);
 
     return {
@@ -135,83 +138,6 @@ export class ClaudeCodeExecutor implements Executor {
       return result || "(no file changes)";
     } catch {
       return "(could not capture diff)";
-    }
-  }
-
-  private async commitAndPushPR(
-    workDir: string,
-    branchName: string,
-    task: TaskPayload
-  ): Promise<string | null> {
-    await this.commitChanges(workDir, task.title);
-    return await this.pushAndCreatePR(workDir, branchName, task);
-  }
-
-  private async commitChanges(workDir: string, title: string): Promise<void> {
-    try {
-      const { stdout: status } = await execAsync("git status --porcelain", {
-        cwd: workDir,
-        shell: "/bin/zsh",
-      });
-      if (!status.trim()) return;
-
-      await execAsync("git add -A", { cwd: workDir, shell: "/bin/zsh" });
-      const msg = `promptrelay: ${title}`.replace(/'/g, "");
-      await execAsync(`git commit -m '${msg}'`, {
-        cwd: workDir, shell: "/bin/zsh",
-      });
-    } catch {
-      // No changes to commit
-    }
-  }
-
-  private async pushAndCreatePR(
-    workDir: string,
-    branchName: string,
-    task: TaskPayload
-  ): Promise<string | null> {
-    try {
-      // Check if there are any commits to push
-      const { stdout: log } = await execAsync(
-        `git log origin/HEAD..HEAD --oneline 2>/dev/null || git log --oneline -1`,
-        { cwd: workDir, shell: "/bin/zsh" }
-      );
-      if (!log.trim()) return null;
-
-      // Push the branch
-      await execAsync(`git push origin '${branchName}' --force-with-lease`, {
-        cwd: workDir, shell: "/bin/zsh", timeout: 60_000,
-      });
-
-      // Build PR body referencing the original issue
-      const issueRef = task.githubIssueUrl
-        ? `\n\nCloses ${task.githubIssueUrl}`
-        : "";
-      const body = `## ${task.title}\n\nExecuted via [PromptRelay](https://promptrelay.dev) by a volunteer.\n\n**Prompt:**\n> ${task.prompt.slice(0, 500)}${issueRef}`;
-      const escapedBody = body.replace(/'/g, "'\\''");
-      const escapedTitle = task.title.replace(/'/g, "'\\''");
-
-      const { stdout: prUrl } = await execAsync(
-        `gh pr create --title '${escapedTitle}' --body '${escapedBody}' --head '${branchName}'`,
-        { cwd: workDir, shell: "/bin/zsh", timeout: 30_000 }
-      );
-
-      return prUrl.trim();
-    } catch (err) {
-      // If PR already exists or push failed, not fatal
-      const msg = (err as Error).message;
-      if (msg.includes("already exists")) {
-        try {
-          const { stdout } = await execAsync(
-            `gh pr view '${branchName}' --json url -q .url`,
-            { cwd: workDir, shell: "/bin/zsh" }
-          );
-          return stdout.trim();
-        } catch {
-          return null;
-        }
-      }
-      return null;
     }
   }
 
@@ -362,7 +288,7 @@ export class ClaudeCodeExecutor implements Executor {
       "Follow the maintainer's prompt exactly.",
       "If the prompt asks for code, docs, tests, fixes, refactors, or other repository changes, edit the files directly in the working tree.",
       "If the prompt asks for analysis, review, or an answer, provide the response without changing files unless changes are explicitly requested.",
-      "Do not create commits, push branches, or open pull requests yourself. PromptRelay will commit, push, and open a PR automatically if you modify files.",
+      "Do not create commits, push branches, or open pull requests yourself. PromptRelay will commit, push to your fork, and open a PR automatically if you modify files.",
       "Keep unrelated changes out of the worktree and summarize what you did.",
     ].join("\n");
   }

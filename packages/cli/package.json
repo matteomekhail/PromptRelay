@@ -1,6 +1,6 @@
 {
   "name": "promptrelay",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Volunteer CLI and local execution daemon for PromptRelay",
   "type": "module",
   "bin": {

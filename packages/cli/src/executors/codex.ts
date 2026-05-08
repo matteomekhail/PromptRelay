@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Executor, TaskPayload, ExecutionResult } from "./types.js";
 import { isUnsafeExecutionAllowed } from "../config.js";
+import { commitAndOpenForkPullRequest } from "./github-pr.js";
 
 const execAsync = promisify(exec);
 
@@ -98,7 +99,12 @@ export class CodexExecutor implements Executor {
 
       const hasChanges = await this.hasChanges(workDir);
       const prUrl = hasChanges
-        ? await this.commitAndPushPR(workDir, branchName, task)
+        ? await commitAndOpenForkPullRequest({
+            workDir,
+            branchName,
+            task,
+            env: this.toolEnv(),
+          })
         : null;
 
       let content = stdout.trim();
@@ -194,73 +200,6 @@ export class CodexExecutor implements Executor {
     return stdout.trim().length > 0;
   }
 
-  private async commitAndPushPR(
-    workDir: string,
-    branchName: string,
-    task: TaskPayload
-  ): Promise<string | null> {
-    await this.commitChanges(workDir, task.title);
-    return await this.pushAndCreatePR(workDir, branchName, task);
-  }
-
-  private async commitChanges(workDir: string, title: string): Promise<void> {
-    try {
-      if (!(await this.hasChanges(workDir))) return;
-
-      await execAsync("git add -A", { cwd: workDir, shell: "/bin/zsh" });
-      const msg = `promptrelay: ${title}`.replace(/'/g, "");
-      await execAsync(`git commit -m '${msg}'`, {
-        cwd: workDir, shell: "/bin/zsh",
-      });
-    } catch {}
-  }
-
-  private async pushAndCreatePR(
-    workDir: string,
-    branchName: string,
-    task: TaskPayload
-  ): Promise<string | null> {
-    try {
-      const { stdout: log } = await execAsync(
-        `git log origin/HEAD..HEAD --oneline 2>/dev/null || git log --oneline -1`,
-        { cwd: workDir, shell: "/bin/zsh" }
-      );
-      if (!log.trim()) return null;
-
-      await execAsync(`git push origin '${branchName}' --force-with-lease`, {
-        cwd: workDir, shell: "/bin/zsh", timeout: 60_000,
-      });
-
-      const issueRef = task.githubIssueUrl
-        ? `\n\nCloses ${task.githubIssueUrl}`
-        : "";
-      const body = `## ${task.title}\n\nExecuted via [PromptRelay](https://promptrelay.dev) by a volunteer.\n\n**Prompt:**\n> ${task.prompt.slice(0, 500)}${issueRef}`;
-      const escapedBody = body.replace(/'/g, "'\\''");
-      const escapedTitle = task.title.replace(/'/g, "'\\''");
-
-      const { stdout: prUrl } = await execAsync(
-        `gh pr create --title '${escapedTitle}' --body '${escapedBody}' --head '${branchName}'`,
-        { cwd: workDir, shell: "/bin/zsh", timeout: 30_000 }
-      );
-
-      return prUrl.trim();
-    } catch (err) {
-      const msg = (err as Error).message;
-      if (msg.includes("already exists")) {
-        try {
-          const { stdout } = await execAsync(
-            `gh pr view '${branchName}' --json url -q .url`,
-            { cwd: workDir, shell: "/bin/zsh" }
-          );
-          return stdout.trim();
-        } catch {
-          return null;
-        }
-      }
-      return null;
-    }
-  }
-
   private buildPrompt(task: TaskPayload): string {
     return `You are working on this GitHub repository with PromptRelay.
 
@@ -268,7 +207,7 @@ PromptRelay has already cloned or updated the repository and set your current wo
 Follow the maintainer's prompt exactly.
 If the prompt asks for code, docs, tests, fixes, refactors, or other repository changes, edit files directly in the working tree.
 If the prompt asks for analysis, review, or an answer, respond without changing files unless changes are explicitly requested.
-Do not create commits, push branches, or open pull requests yourself. PromptRelay will commit, push, and open a PR automatically if you modify files.
+Do not create commits, push branches, or open pull requests yourself. PromptRelay will commit, push to your fork, and open a PR automatically if you modify files.
 
 Task: ${task.title}
 Project: ${task.projectName ?? "unknown"}

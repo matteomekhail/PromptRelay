@@ -5,6 +5,7 @@ import { getConfig, getEnabledProviders } from "./config.js";
 import { getConvexAuthToken } from "./convex-auth.js";
 import { selectExecutor, getExecutor } from "./executors/index.js";
 import { ClaudeCodeExecutor } from "./executors/claude-code.js";
+import { openForkPullRequest } from "./executors/github-pr.js";
 import type { Executor, ExecutionResult, TaskPayload } from "./executors/types.js";
 
 interface QueuedTask {
@@ -331,18 +332,21 @@ export class Daemon {
     const prTitle = titleMatch?.[1]?.trim() ?? task.title;
 
     try {
-      await execAsync(`git push origin '${branch}'`, {
-        cwd: localPath, shell: "/bin/zsh", timeout: 60_000,
+      await execAsync(`git checkout '${branch.replace(/'/g, "'\\''")}'`, {
+        cwd: localPath, shell: "/bin/zsh", timeout: 30_000,
       });
 
-      const { stdout } = await execAsync(
-        `gh pr create --title '${prTitle.replace(/'/g, "")}' --body 'Filed via PromptRelay' --head '${branch}'`,
-        { cwd: localPath, shell: "/bin/zsh", timeout: 30_000 }
-      );
+      const prUrl = await openForkPullRequest({
+        workDir: localPath,
+        branchName: branch,
+        task: this.toPayload(task),
+        title: prTitle,
+        prompt: "Filed via PromptRelay",
+      });
 
-      return `PR created: ${stdout.trim()}`;
+      return prUrl ? `PR created: ${prUrl}` : "No PR created.";
     } catch (err) {
-      return `PR filing failed: ${(err as Error).message}\n\nThe branch \`${branch}\` has been pushed. You can create the PR manually.`;
+      return `PR filing failed: ${(err as Error).message}\n\nPromptRelay did not push to origin.`;
     }
   }
 
