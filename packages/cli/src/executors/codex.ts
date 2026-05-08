@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Executor, TaskPayload, ExecutionResult } from "./types.js";
 import { isUnsafeExecutionAllowed } from "../config.js";
 
@@ -15,9 +15,53 @@ export class CodexExecutor implements Executor {
   name = "codex";
   displayName = "OpenAI Codex CLI";
 
+  private toolEnv() {
+    const cliDir = process.argv[1] ? dirname(process.argv[1]) : "";
+    return {
+      ...process.env,
+      HOME: homedir(),
+      PATH: [
+        cliDir,
+        dirname(process.execPath),
+        `${homedir()}/.local/bin`,
+        "/usr/local/bin",
+        "/opt/homebrew/bin",
+        "/usr/bin",
+        "/bin",
+        process.env.PATH ?? "",
+      ].join(":"),
+    };
+  }
+
+  private async findCodexBin(): Promise<string> {
+    const cliDir = process.argv[1] ? dirname(process.argv[1]) : "";
+    const localBins = [
+      cliDir ? join(cliDir, "codex") : "",
+      join(dirname(process.execPath), "codex"),
+      join(homedir(), ".local", "bin", "codex"),
+    ].filter(Boolean);
+    for (const bin of localBins) {
+      if (existsSync(bin)) return bin;
+    }
+
+    try {
+      const { stdout } = await execAsync("which codex", {
+        shell: "/bin/zsh",
+        env: this.toolEnv(),
+      });
+      if (stdout.trim()) return stdout.trim();
+    } catch {}
+
+    return "codex";
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
-      await execAsync("codex --version", { shell: "/bin/zsh" });
+      const codexBin = await this.findCodexBin();
+      await execAsync(`'${codexBin}' --version`, {
+        shell: "/bin/zsh",
+        env: this.toolEnv(),
+      });
       return true;
     } catch {
       return false;
@@ -39,15 +83,16 @@ export class CodexExecutor implements Executor {
 
     const prompt = this.buildPrompt(task);
     const escapedPrompt = prompt.replace(/'/g, "'\\''");
+    const codexBin = await this.findCodexBin();
 
     try {
       const { stdout } = await execAsync(
-        `${this.codexCommand()} '${escapedPrompt}'`,
+        `${this.codexCommand(codexBin)} '${escapedPrompt}'`,
         {
           cwd: workDir,
           timeout: 300_000,
           shell: "/bin/zsh",
-          env: process.env,
+          env: this.toolEnv(),
         }
       );
 
@@ -124,10 +169,10 @@ export class CodexExecutor implements Executor {
     }
   }
 
-  private codexCommand(): string {
+  private codexCommand(codexBin: string): string {
     return isUnsafeExecutionAllowed()
-      ? "codex --quiet --approval-mode full-auto"
-      : "codex --quiet";
+      ? `'${codexBin}' --quiet --approval-mode full-auto`
+      : `'${codexBin}' --quiet`;
   }
 
   private async assertCleanWorktree(workDir: string): Promise<void> {

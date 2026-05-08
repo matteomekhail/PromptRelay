@@ -5,7 +5,7 @@ import { getConfig, getEnabledProviders } from "./config.js";
 import { getConvexAuthToken } from "./convex-auth.js";
 import { selectExecutor, getExecutor } from "./executors/index.js";
 import { ClaudeCodeExecutor } from "./executors/claude-code.js";
-import type { TaskPayload } from "./executors/types.js";
+import type { Executor, ExecutionResult, TaskPayload } from "./executors/types.js";
 
 interface QueuedTask {
   _id: string;
@@ -146,36 +146,6 @@ export class Daemon {
       taskId: task._id,
     });
 
-    let executor = null;
-    if (task.preferredProvider) {
-      const preferred = getExecutor(task.preferredProvider);
-      if (preferred && (await preferred.isAvailable())) {
-        executor = preferred;
-      }
-    }
-
-    if (!executor) {
-      executor = await selectExecutor(
-        enabledProviders.filter((p) => p !== "mock")
-      );
-    }
-
-    if (!executor) {
-      executor = await selectExecutor(["mock"]);
-    }
-
-    if (!executor) {
-      throw new Error("No available executor");
-    }
-
-    this.callbacks.onTaskRunning?.(task, executor.displayName);
-    await this.postTaskAcceptedToIssue(task, executor.displayName);
-    this.callbacks.onTaskPreview?.(
-      task,
-      executor.displayName,
-      executor.previewCommand?.(this.toPayload(task)) ?? "provider-managed execution"
-    );
-
     if (task.prompt.startsWith("__PROMPTRELAY_FILE_PR__")) {
       const prResult = await this.filePR(task);
       await this.mutation("tasks:complete", {
@@ -190,26 +160,54 @@ export class Daemon {
       return;
     }
 
-    if (executor instanceof ClaudeCodeExecutor) {
-      executor.setStreamCallback((content: string) => {
-        this.mutation("tasks:updateStream", {
-          taskId: task._id,
-          content,
-        }).catch(() => {});
-      });
+    const payload = this.toPayload(task);
+    const executors = await this.getExecutionCandidates(task, enabledProviders);
+    if (executors.length === 0) {
+      throw new Error("No available Claude Code or Codex executor");
     }
 
-    const payload = this.toPayload(task);
+    let result: ExecutionResult | null = null;
+    const errors: string[] = [];
+    for (const executor of executors) {
+      this.callbacks.onTaskRunning?.(task, executor.displayName);
+      await this.postTaskAcceptedToIssue(task, executor.displayName);
+      this.callbacks.onTaskPreview?.(
+        task,
+        executor.displayName,
+        executor.previewCommand?.(payload) ?? "provider-managed execution"
+      );
 
-    let result;
-    try {
-      result = await executor.execute(payload);
-    } catch (err) {
+      if (executor instanceof ClaudeCodeExecutor) {
+        executor.setStreamCallback((content: string) => {
+          this.mutation("tasks:updateStream", {
+            taskId: task._id,
+            content,
+          }).catch(() => {});
+        });
+      }
+
+      try {
+        result = await executor.execute(payload);
+        break;
+      } catch (err) {
+        const message = `${executor.displayName}: ${(err as Error).message}`;
+        errors.push(message);
+        this.callbacks.onError?.(
+          new Error(
+            executors.length > 1
+              ? `${message}; trying next provider`
+              : message
+          )
+        );
+      }
+    }
+
+    if (!result) {
       await this.mutation("tasks:fail", {
         taskId: task._id,
-        error: (err as Error).message,
+        error: errors.join("\n"),
       });
-      throw err;
+      throw new Error(errors.join("; "));
     }
 
     // For review/answer tasks, post result as a comment on the issue instead of PR
@@ -228,6 +226,29 @@ export class Daemon {
 
     this.tasksCompletedToday++;
     this.callbacks.onTaskCompleted?.(task, result.durationMs);
+  }
+
+  private async getExecutionCandidates(
+    task: QueuedTask,
+    enabledProviders: string[]
+  ): Promise<Executor[]> {
+    const providerNames = [
+      ...(task.preferredProvider ? [task.preferredProvider] : []),
+      ...enabledProviders,
+    ].filter((provider, index, all) => all.indexOf(provider) === index);
+
+    const executors: Executor[] = [];
+    for (const provider of providerNames) {
+      const executor = getExecutor(provider);
+      if (executor && (await executor.isAvailable())) {
+        executors.push(executor);
+      }
+    }
+
+    if (executors.length > 0) return executors;
+
+    const fallback = await selectExecutor();
+    return fallback ? [fallback] : [];
   }
 
   private async postTaskAcceptedToIssue(

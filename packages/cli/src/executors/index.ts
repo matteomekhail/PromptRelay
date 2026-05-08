@@ -1,5 +1,4 @@
 import type { Executor } from "./types.js";
-import { MockExecutor } from "./mock.js";
 import { ClaudeCodeExecutor } from "./claude-code.js";
 import { CodexExecutor } from "./codex.js";
 
@@ -8,7 +7,6 @@ export type { Executor, TaskPayload, ExecutionResult, ProviderConfig } from "./t
 const ALL_EXECUTORS: Executor[] = [
   new ClaudeCodeExecutor(),
   new CodexExecutor(),
-  new MockExecutor(),
 ];
 
 export function getExecutor(name: string): Executor | undefined {
@@ -42,8 +40,7 @@ export async function selectExecutor(
     }
   }
 
-  // Fall back to first available (excluding mock unless it's the only one)
+  // Fall back to the first available real executor.
   const available = await detectAvailableProviders();
-  const real = available.filter((e) => e.name !== "mock");
-  return real[0] ?? available[0] ?? null;
+  return available[0] ?? null;
 }

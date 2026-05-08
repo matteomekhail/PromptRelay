@@ -6,12 +6,13 @@ import type { FunctionReference } from "convex/server";
 import {
   getConfig,
   setConfig,
+  SUPPORTED_PROVIDERS,
   type VolunteerConfig,
 } from "./config.js";
 import { getConvexAuthToken } from "./convex-auth.js";
 
 const ALL_CATEGORIES = ["docs", "tests", "bugfix", "review", "refactor", "translation"];
-const ALL_PROVIDERS = ["claude-code", "codex", "mock"];
+const ALL_PROVIDERS: string[] = [...SUPPORTED_PROVIDERS];
 
 export async function runSettingsTui(): Promise<void> {
   const rl = readline.createInterface({ input, output });
@@ -242,7 +243,7 @@ function formatProtectedExecution(allowUnsafeExecution: boolean) {
 
 function formatProviders(providers: VolunteerConfig["providers"]) {
   const enabled = providers
-    .filter((provider) => provider.enabled)
+    .filter((provider) => provider.enabled && ALL_PROVIDERS.includes(provider.provider))
     .map((provider) => provider.provider);
   return formatList(enabled);
 }

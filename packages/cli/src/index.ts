@@ -128,13 +128,12 @@ async function main() {
   // Detect providers
   const spinner = ora("  Detecting AI providers...").start();
   const available = await detectAvailableProviders();
-  const real = available.filter((e) => e.name !== "mock");
   spinner.stop();
 
-  if (real.length > 0) {
-    console.log(`  ${chalk.dim("Providers:")} ${real.map((e) => e.displayName).join(", ")}`);
+  if (available.length > 0) {
+    console.log(`  ${chalk.dim("Providers:")} ${available.map((e) => e.displayName).join(", ")}`);
   } else {
-    console.log(`  ${chalk.dim("Providers:")} mock ${chalk.yellow("(install Claude Code or Codex for real execution)")}`);
+    console.log(`  ${chalk.dim("Providers:")} ${chalk.yellow("none (install Claude Code or Codex)")}`);
   }
 
   console.log(`  ${chalk.dim("Max tasks/day:")} ${config.maxTasksPerDay}`);

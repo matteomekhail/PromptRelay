@@ -249,7 +249,9 @@ export class ClaudeCodeExecutor implements Executor {
       );
 
       let output = "";
+      let stderr = "";
       let lastFlush = 0;
+      let settled = false;
 
       child.stdout.on("data", (chunk: Buffer) => {
         output += chunk.toString();
@@ -260,25 +262,36 @@ export class ClaudeCodeExecutor implements Executor {
         }
       });
 
-      child.stderr.on("data", () => {});
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        child.kill();
+        reject(new Error("Claude Code timed out (10 min)"));
+      }, 600_000);
 
       child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         if (this.onStream) this.onStream(output);
         if (code === 0 || code === null) {
           resolve(output.trim());
         } else {
-          reject(new Error(`Claude Code exited with code ${code}`));
+          const detail = stderr.trim() ? `: ${stderr.trim().slice(-1000)}` : "";
+          reject(new Error(`Claude Code exited with code ${code}${detail}`));
         }
       });
 
       child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
         reject(new Error(`Claude Code spawn error: ${err.message}`));
       });
-
-      setTimeout(() => {
-        child.kill();
-        reject(new Error("Claude Code timed out (10 min)"));
-      }, 600_000);
     });
   }
 

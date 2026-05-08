@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,9 +30,10 @@ export async function installService(): Promise<void> {
   // Create a runner script that the service will execute
   const scriptPath = getDaemonScript();
   const cliPath = process.argv[1]; // path to the running script
+  const cliDir = dirname(cliPath);
 
   const script = `#!/bin/bash
-export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+export PATH="${cliDir}:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 exec node "${cliPath}" --foreground >> "${LOG_FILE}" 2>&1
 `;
   await writeFile(scriptPath, script, { mode: 0o755 });
@@ -59,7 +60,7 @@ exec node "${cliPath}" --foreground >> "${LOG_FILE}" 2>&1
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>${homedir()}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>${cliDir}:${homedir()}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>
