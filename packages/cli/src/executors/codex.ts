@@ -71,8 +71,8 @@ export class CodexExecutor implements Executor {
 
   previewCommand(): string {
     return isUnsafeExecutionAllowed()
-      ? "codex --quiet --approval-mode full-auto <prompt>"
-      : "codex --quiet <prompt>";
+      ? "codex exec --dangerously-bypass-approvals-and-sandbox <prompt>"
+      : "codex exec --ask-for-approval never --sandbox workspace-write <prompt>";
   }
 
   async execute(task: TaskPayload): Promise<ExecutionResult> {
@@ -176,8 +176,8 @@ export class CodexExecutor implements Executor {
 
   private codexCommand(codexBin: string): string {
     return isUnsafeExecutionAllowed()
-      ? `'${codexBin}' --quiet --approval-mode full-auto`
-      : `'${codexBin}' --quiet`;
+      ? `'${codexBin}' exec --dangerously-bypass-approvals-and-sandbox`
+      : `'${codexBin}' exec --ask-for-approval never --sandbox workspace-write`;
   }
 
   private async assertCleanWorktree(workDir: string): Promise<void> {

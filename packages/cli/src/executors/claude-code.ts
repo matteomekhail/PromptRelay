@@ -50,8 +50,8 @@ export class ClaudeCodeExecutor implements Executor {
   previewCommand(): string {
     const unsafe = isUnsafeExecutionAllowed();
     return unsafe
-      ? "claude -p <prompt> --output-format text --dangerously-skip-permissions"
-      : "claude -p <prompt> --output-format text";
+      ? "claude -p <prompt> --output-format text --permission-mode bypassPermissions"
+      : "claude -p <prompt> --output-format text --permission-mode auto";
   }
 
   async execute(task: TaskPayload): Promise<ExecutionResult> {
@@ -262,10 +262,14 @@ export class ClaudeCodeExecutor implements Executor {
   }
 
   private buildClaudeArgs(prompt: string) {
-    const args = ["-p", prompt, "--output-format", "text"];
-    if (isUnsafeExecutionAllowed()) {
-      args.push("--dangerously-skip-permissions");
-    }
+    const args = [
+      "-p",
+      prompt,
+      "--output-format",
+      "text",
+      "--permission-mode",
+      isUnsafeExecutionAllowed() ? "bypassPermissions" : "auto",
+    ];
     return args;
   }
 

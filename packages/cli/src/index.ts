@@ -137,6 +137,11 @@ async function main() {
   }
 
   console.log(`  ${chalk.dim("Max tasks/day:")} ${config.maxTasksPerDay}`);
+  console.log(
+    `  ${chalk.dim("Execution:")} ${
+      config.allowUnsafeExecution ? chalk.yellow("full access") : chalk.green("sandboxed")
+    }`
+  );
 
   // If --foreground flag, run in foreground (used by the background service)
   if (arg === "--foreground") {

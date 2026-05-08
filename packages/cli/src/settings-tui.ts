@@ -73,7 +73,7 @@ function renderSettings() {
   console.log(`  1. Max tasks/day        ${chalk.cyan(config.maxTasksPerDay)}`);
   console.log(`  2. Providers            ${formatProviders(config.providers)}`);
   console.log(`  3. Trusted projects     ${formatList(config.trustedProjects)}`);
-  console.log(`  4. Protected execution  ${formatProtectedExecution(config.allowUnsafeExecution)}`);
+  console.log(`  4. Execution mode       ${formatExecutionMode(config.allowUnsafeExecution)}`);
   console.log(`  5. Auto-approve trusted ${formatBoolean(config.autoApprove)}`);
   console.log();
   console.log(`  0. Save and exit\n`);
@@ -221,8 +221,8 @@ function formatConnection(config: VolunteerConfig) {
     : chalk.red("needs login");
 }
 
-function formatProtectedExecution(allowUnsafeExecution: boolean) {
-  return allowUnsafeExecution ? chalk.red("disabled") : chalk.green("enabled");
+function formatExecutionMode(allowUnsafeExecution: boolean) {
+  return allowUnsafeExecution ? chalk.yellow("full access") : chalk.green("sandboxed");
 }
 
 function formatProviders(providers: VolunteerConfig["providers"]) {

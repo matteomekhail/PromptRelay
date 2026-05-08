@@ -20,6 +20,11 @@ export interface VolunteerConfig {
   idleCheckIntervalMs: number;
 }
 
+type InternalVolunteerConfig = VolunteerConfig & {
+  allowedCategories?: string[];
+  executionModeMigratedAt?: number;
+};
+
 const defaults: VolunteerConfig = {
   convexUrl: process.env.PROMPTRELAY_CONVEX_URL ?? PRODUCTION_CONVEX_URL,
   appUrl: process.env.PROMPTRELAY_APP_URL ?? PRODUCTION_APP_URL,
@@ -30,14 +35,20 @@ const defaults: VolunteerConfig = {
   ],
   autoApprove: false,
   trustedProjects: [],
-  allowUnsafeExecution: process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION === "1",
+  allowUnsafeExecution: process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION !== "0",
   idleCheckIntervalMs: 5000,
 };
 
-const config = new Conf<VolunteerConfig>({
+const config = new Conf<InternalVolunteerConfig>({
   projectName: "promptrelay-volunteer",
   defaults,
 });
+
+if (config.has("allowedCategories") && !config.has("executionModeMigratedAt")) {
+  config.set("allowUnsafeExecution", true);
+  config.set("executionModeMigratedAt", Date.now());
+  config.delete("allowedCategories");
+}
 
 export function getConfig(): VolunteerConfig {
   return config.store;
@@ -89,8 +100,7 @@ export function getConfigPath(): string {
 }
 
 export function isUnsafeExecutionAllowed(): boolean {
-  return (
-    config.get("allowUnsafeExecution") ||
-    process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION === "1"
-  );
+  if (process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION === "0") return false;
+  if (process.env.PROMPTRELAY_ALLOW_UNSAFE_EXECUTION === "1") return true;
+  return config.get("allowUnsafeExecution") !== false;
 }
