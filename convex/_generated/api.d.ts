@@ -9,6 +9,7 @@
  */
 
 import type * as github from "../github.js";
+import type * as lib_auth from "../lib/auth.js";
 import type * as projects from "../projects.js";
 import type * as results from "../results.js";
 import type * as seed from "../seed.js";
@@ -24,6 +25,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   github: typeof github;
+  "lib/auth": typeof lib_auth;
   projects: typeof projects;
   results: typeof results;
   seed: typeof seed;
