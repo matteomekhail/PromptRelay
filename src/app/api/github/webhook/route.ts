@@ -3,7 +3,7 @@ import { createGitHubInstallationToken } from "@/lib/github-app";
 
 export const runtime = "nodejs";
 
-const COMMAND_PREFIX = "/promptrelay";
+const DEFAULT_COMMAND_SLUG = "promptrelay";
 
 interface ParsedCommand {
   action: string;
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     }
 
     const comment = payload.comment?.body ?? "";
-    if (!comment.startsWith(COMMAND_PREFIX)) {
+    if (!hasCommandTrigger(comment)) {
       return NextResponse.json({ ok: true, skipped: true });
     }
 
@@ -223,11 +223,10 @@ async function verifyGitHubSignature(
 }
 
 function parseCommand(comment: string): ParsedCommand | null {
-  const lines = comment.trim().split("\n");
-  const firstLine = lines[0].trim();
+  const command = extractCommand(comment);
+  if (!command) return null;
 
-  // /promptrelay <action> [extra context on same line]
-  const parts = firstLine.replace(COMMAND_PREFIX, "").trim().split(/\s+/);
+  const parts = command.firstLine.split(/\s+/).filter(Boolean);
   const action = parts[0]?.toLowerCase();
 
   if (!action || !ACTION_MAP[action]) {
@@ -238,11 +237,44 @@ function parseCommand(comment: string): ParsedCommand | null {
 
   // Everything after the command is the prompt context
   const inlineContext = parts.slice(1).join(" ");
-  const remainingLines = lines.slice(1).join("\n").trim();
-  const prompt = [inlineContext, remainingLines].filter(Boolean).join("\n") ||
+  const prompt = [inlineContext, command.remainingLines].filter(Boolean).join("\n") ||
     `Perform a ${action} on this issue/PR.`;
 
   return { action, category, outputType, prompt };
+}
+
+function hasCommandTrigger(comment: string): boolean {
+  return extractCommand(comment) !== null;
+}
+
+function extractCommand(
+  comment: string
+): { firstLine: string; remainingLines: string } | null {
+  const lines = comment.trim().split(/\r?\n/);
+  const firstLine = lines[0]?.trim() ?? "";
+  const match = firstLine.match(getCommandTriggerPattern());
+  if (!match) return null;
+
+  return {
+    firstLine: firstLine.slice(match[0].length).trim(),
+    remainingLines: lines.slice(1).join("\n").trim(),
+  };
+}
+
+function getCommandTriggerPattern(): RegExp {
+  const slug = process.env.GITHUB_APP_SLUG?.trim() || DEFAULT_COMMAND_SLUG;
+  const slugs = Array.from(new Set([slug, DEFAULT_COMMAND_SLUG]))
+    .map(escapeRegExp)
+    .join("|");
+
+  return new RegExp(
+    `^\\s*(?:\\/(?:${slugs})|@(?:${slugs})(?:\\[bot\\])?)(?:[:,]?\\s+|[:,]?\\s*$)`,
+    "i"
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function formatHelp(): string {
@@ -250,16 +282,16 @@ function formatHelp(): string {
 
 | Command | What it does |
 |---------|-------------|
-| \`/promptrelay review\` | Code review |
-| \`/promptrelay docs\` | Generate documentation |
-| \`/promptrelay tests\` | Generate tests |
-| \`/promptrelay fix\` | Suggest a bugfix (PR draft) |
-| \`/promptrelay refactor\` | Suggest refactoring |
-| \`/promptrelay translate\` | Translate content |
+| \`@promptrelay review\` or \`/promptrelay review\` | Code review |
+| \`@promptrelay docs\` or \`/promptrelay docs\` | Generate documentation |
+| \`@promptrelay tests\` or \`/promptrelay tests\` | Generate tests |
+| \`@promptrelay fix\` or \`/promptrelay fix\` | Suggest a bugfix (PR draft) |
+| \`@promptrelay refactor\` or \`/promptrelay refactor\` | Suggest refactoring |
+| \`@promptrelay translate\` or \`/promptrelay translate\` | Translate content |
 
 Add context after the command:
 \`\`\`
-/promptrelay review Focus on error handling and race conditions
+@promptrelay review Focus on error handling and race conditions
 \`\`\``;
 }
 
