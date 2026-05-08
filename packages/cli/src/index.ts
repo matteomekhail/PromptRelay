@@ -4,7 +4,7 @@ import ora from "ora";
 import type { FunctionReference } from "convex/server";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { loginWithDeviceFlow } from "./auth.js";
+import { loginWithDeviceFlow, logout } from "./auth.js";
 import {
   getConfig,
   setConvexUrl,
@@ -24,6 +24,33 @@ const arg = process.argv[2];
 
 async function main() {
   // Handle sub-commands
+  if (arg === "login") {
+    const { username } = await loginWithDeviceFlow();
+    await ensureVolunteerRole();
+    console.log(chalk.green(`\n  Signed in as ${username}\n`));
+    return;
+  }
+
+  if (arg === "logout") {
+    logout();
+    console.log(chalk.dim("\n  Signed out.\n"));
+    return;
+  }
+
+  if (arg === "whoami") {
+    const config = getConfig();
+    if (!isAuthenticated()) {
+      console.log(chalk.yellow("\n  Not signed in.\n"));
+      process.exit(1);
+    }
+    console.log(chalk.dim("\n  PromptRelay — Account\n"));
+    console.log(`  GitHub: ${config.githubUsername}`);
+    console.log(`  App:    ${config.appUrl}`);
+    console.log(`  Convex: ${config.convexUrl}`);
+    console.log();
+    return;
+  }
+
   if (arg === "stop") {
     await uninstallService();
     console.log(chalk.dim("\n  PromptRelay daemon stopped and uninstalled.\n"));
@@ -56,7 +83,7 @@ async function main() {
 
   if (arg !== "start" && arg !== "--foreground") {
     console.log(chalk.red(`\n  Unknown command: ${arg}\n`));
-    console.log(chalk.dim("  Usage: promptrelay [settings|start|--foreground|status|logs|stop]\n"));
+    console.log(chalk.dim("  Usage: promptrelay [login|logout|whoami|settings|start|--foreground|status|logs|stop]\n"));
     process.exit(1);
   }
 

@@ -1,6 +1,8 @@
 import open from "open";
 import { setAuth, clearAuth } from "./config.js";
 
+const DEFAULT_GITHUB_CLIENT_ID = "Iv23liaUNUGCaIw6A4Z1";
+
 interface DeviceCodeResponse {
   device_code: string;
   user_code: string;
@@ -25,7 +27,8 @@ interface GitHubUser {
 }
 
 function getClientId(): string {
-  const clientId = process.env.PROMPTRELAY_GITHUB_CLIENT_ID;
+  const clientId =
+    process.env.PROMPTRELAY_GITHUB_CLIENT_ID ?? DEFAULT_GITHUB_CLIENT_ID;
   if (!clientId) {
     throw new Error("PROMPTRELAY_GITHUB_CLIENT_ID is not configured.");
   }

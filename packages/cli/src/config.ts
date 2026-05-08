@@ -18,8 +18,10 @@ export interface VolunteerConfig {
 }
 
 const defaults: VolunteerConfig = {
-  convexUrl: process.env.PROMPTRELAY_CONVEX_URL ?? "",
-  appUrl: process.env.PROMPTRELAY_APP_URL ?? "http://localhost:3000",
+  convexUrl:
+    process.env.PROMPTRELAY_CONVEX_URL ??
+    "https://successful-ox-560.convex.cloud",
+  appUrl: process.env.PROMPTRELAY_APP_URL ?? "https://promptrelay.dev",
   maxTasksPerDay: 10,
   allowedCategories: ["docs", "tests", "bugfix", "review", "refactor", "translation"],
   providers: [
