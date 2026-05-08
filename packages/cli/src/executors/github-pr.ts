@@ -13,6 +13,7 @@ interface ForkPrOptions {
   env?: ExecEnv;
   title?: string;
   prompt?: string;
+  headRef?: string;
 }
 
 interface RepoRef {
@@ -40,10 +41,20 @@ export async function openForkPullRequest(
   if (!repo) return null;
 
   const volunteer = await ghLogin(options.env);
+  ensureSafePromptRelayBranch(options.branchName);
   if (volunteer === repo.owner) {
-    throw new Error(
-      "Cannot create a fork PR because the authenticated GitHub user owns the target repository. PromptRelay will not push to origin."
+    await execGit(
+      `git push origin ${shellQuote(options.branchName)}:${shellQuote(options.branchName)} --force-with-lease`,
+      options.workDir,
+      options.env,
+      60_000
     );
+    return await createOrFindPullRequest({
+      ...options,
+      repo,
+      volunteer,
+      headRef: options.branchName,
+    });
   }
 
   const forkFullName = await ensureFork(repo, volunteer, options.env);
@@ -60,6 +71,7 @@ export async function openForkPullRequest(
     ...options,
     repo,
     volunteer,
+    headRef: `${volunteer}:${options.branchName}`,
   });
 }
 
@@ -107,7 +119,7 @@ async function createOrFindPullRequest(
     "gh pr create",
     `--repo ${shellQuote(options.repo.fullName)}`,
     `--base ${shellQuote(base)}`,
-    `--head ${shellQuote(`${options.volunteer}:${options.branchName}`)}`,
+    `--head ${shellQuote(options.headRef ?? `${options.volunteer}:${options.branchName}`)}`,
     `--title ${shellQuote(title)}`,
     `--body ${shellQuote(body)}`,
   ].join(" ");
@@ -125,7 +137,7 @@ async function createOrFindPullRequest(
       [
         "gh pr list",
         `--repo ${shellQuote(options.repo.fullName)}`,
-        `--head ${shellQuote(options.branchName)}`,
+        `--head ${shellQuote(options.headRef ?? options.branchName)}`,
         "--json url,headRepositoryOwner",
         `--jq ${shellQuote(`.[] | select(.headRepositoryOwner.login == "${options.volunteer}") | .url`)}`,
       ].join(" "),
@@ -245,6 +257,15 @@ function parseRepoUrl(repoUrl?: string): RepoRef | null {
     name,
     fullName: `${owner}/${name}`,
   };
+}
+
+function ensureSafePromptRelayBranch(branchName: string): void {
+  if (!branchName.startsWith("promptrelay/")) {
+    throw new Error(`Refusing to push non-PromptRelay branch: ${branchName}`);
+  }
+  if (/^(main|master|develop|trunk)$/i.test(branchName)) {
+    throw new Error(`Refusing to push protected branch: ${branchName}`);
+  }
 }
 
 async function execGit(
