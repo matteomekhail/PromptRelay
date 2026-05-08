@@ -59,9 +59,23 @@ async function main() {
 
   if (arg === "status") {
     const status = await getServiceStatus();
+    const currentTasks = await getCurrentTasks().catch(() => []);
     console.log(chalk.dim("\n  PromptRelay — Status\n"));
     console.log(`  Installed: ${status.installed ? chalk.green("yes") : "no"}`);
     console.log(`  Running: ${status.running ? chalk.green("yes") : "no"}`);
+    if (currentTasks.length > 0) {
+      for (const task of currentTasks) {
+        console.log(`  Current: ${chalk.cyan(task.title)} (${task.status})`);
+        if (task.githubIssueUrl) {
+          console.log(`  Issue:   ${chalk.dim(task.githubIssueUrl)}`);
+        }
+        if (task.lastHeartbeatAt) {
+          console.log(`  Sync:    ${chalk.dim(timeAgo(task.lastHeartbeatAt))}`);
+        }
+      }
+    } else {
+      console.log(`  Current: ${chalk.dim("none")}`);
+    }
     console.log(`  Logs: ${chalk.dim(status.logFile)}`);
     console.log();
     return;
@@ -259,6 +273,34 @@ async function ensureVolunteerRole(): Promise<void> {
   } catch {
     // Already registered
   }
+}
+
+type CurrentTask = {
+  title: string;
+  status: string;
+  githubIssueUrl?: string;
+  lastHeartbeatAt?: number;
+};
+
+async function getCurrentTasks(): Promise<CurrentTask[]> {
+  if (!isAuthenticated()) return [];
+  const { ConvexHttpClient } = await import("convex/browser");
+  const { getConvexAuthToken } = await import("./convex-auth.js");
+  const config = getConfig();
+  const token = await getConvexAuthToken();
+  const client = new ConvexHttpClient(config.convexUrl, { auth: token });
+  return await client.query(
+    "tasks:currentForVolunteer" as unknown as FunctionReference<"query">,
+    {}
+  ) as CurrentTask[];
+}
+
+function timeAgo(timestamp: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
 }
 
 main().catch((err) => {

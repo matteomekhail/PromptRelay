@@ -58,7 +58,9 @@ export default defineSchema({
     attempts: v.optional(v.number()),
     failedReason: v.optional(v.string()),
     streamingContent: v.optional(v.string()),
+    lastHeartbeatAt: v.optional(v.number()),
     acceptedCommentPostedAt: v.optional(v.number()),
+    interruptedCommentPostedAt: v.optional(v.number()),
     executedByProvider: v.optional(v.string()),
     executedByModel: v.optional(v.string()),
     executionDurationMs: v.optional(v.number()),
@@ -68,6 +70,10 @@ export default defineSchema({
     .index("by_maintainerId", ["maintainerId"])
     .index("by_status", ["status"])
     .index("by_status_and_claimExpiresAt", ["status", "claimExpiresAt"])
+    .index("by_claimedByVolunteerId_and_status", [
+      "claimedByVolunteerId",
+      "status",
+    ])
     .index("by_projectId", ["projectId"]),
 
   volunteerSettings: defineTable({

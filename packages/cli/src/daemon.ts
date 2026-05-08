@@ -22,6 +22,14 @@ interface QueuedTask {
   acceptedCommentPostedAt?: number;
 }
 
+interface RecoveredTask {
+  taskId: string;
+  title: string;
+  githubIssueUrl?: string;
+  attempts: number;
+  interruptedCommentPostedAt?: number;
+}
+
 interface DaemonCallbacks {
   onTaskFound?: (task: QueuedTask) => void;
   onTaskApprovalRequired?: (task: QueuedTask) => boolean | Promise<boolean>;
@@ -44,6 +52,7 @@ export class Daemon {
   private lastDayReset = new Date().toDateString();
   private callbacks: DaemonCallbacks;
   private dismissedTaskIds = new Set<string>();
+  private notifiedInterruptedTaskIds = new Set<string>();
 
   constructor(callbacks: DaemonCallbacks = {}) {
     const config = getConfig();
@@ -145,93 +154,100 @@ export class Daemon {
     await this.mutation("tasks:markRunning", {
       taskId: task._id,
     });
+    const stopHeartbeat = this.startHeartbeat(task);
 
-    if (task.prompt.startsWith("__PROMPTRELAY_FILE_PR__")) {
-      const prResult = await this.filePR(task);
+    try {
+      if (task.prompt.startsWith("__PROMPTRELAY_FILE_PR__")) {
+        const prResult = await this.filePR(task);
+        await this.mutation("tasks:complete", {
+          taskId: task._id,
+          content: prResult,
+          executedByProvider: "promptrelay",
+          executedByModel: "gh-cli",
+          executionDurationMs: 0,
+        });
+        this.tasksCompletedToday++;
+        this.callbacks.onTaskCompleted?.(task, 0);
+        return;
+      }
+
+      const payload = this.toPayload(task);
+      const executors = await this.getExecutionCandidates(task, enabledProviders);
+      if (executors.length === 0) {
+        throw new Error("No available Claude Code or Codex executor");
+      }
+
+      if (!task.acceptedCommentPostedAt) {
+        const posted = await this.postTaskAcceptedToIssue(task);
+        if (posted) {
+          await this.mutation("tasks:markAcceptedCommentPosted", {
+            taskId: task._id,
+          });
+        }
+      }
+
+      let result: ExecutionResult | null = null;
+      const errors: string[] = [];
+      for (const executor of executors) {
+        this.callbacks.onTaskRunning?.(task, executor.displayName);
+        this.callbacks.onTaskPreview?.(
+          task,
+          executor.displayName,
+          executor.previewCommand?.(payload) ?? "provider-managed execution"
+        );
+
+        if (executor instanceof ClaudeCodeExecutor) {
+          executor.setStreamCallback((content: string) => {
+            this.mutation("tasks:updateStream", {
+              taskId: task._id,
+              content,
+            }).catch(() => {});
+          });
+        }
+
+        try {
+          result = await executor.execute(payload);
+          break;
+        } catch (err) {
+          const message = `${executor.displayName}: ${(err as Error).message}`;
+          errors.push(message);
+          this.callbacks.onError?.(
+            new Error(
+              executors.length > 1
+                ? `${message}; trying next provider`
+                : message
+            )
+          );
+        }
+      }
+
+      if (!result) {
+        const error = errors.join("\n");
+        await this.mutation("tasks:fail", {
+          taskId: task._id,
+          error,
+        });
+        await this.postTaskFailedToIssue(task, error);
+        throw new Error(errors.join("; "));
+      }
+
+      if (task.githubIssueUrl) {
+        await this.postResultToIssue(task, result.content);
+      }
+
       await this.mutation("tasks:complete", {
         taskId: task._id,
-        content: prResult,
-        executedByProvider: "promptrelay",
-        executedByModel: "gh-cli",
-        executionDurationMs: 0,
+        content: result.content,
+        executedByProvider: result.provider,
+        executedByModel: result.model ?? undefined,
+        executionDurationMs: result.durationMs,
       });
+
       this.tasksCompletedToday++;
-      this.callbacks.onTaskCompleted?.(task, 0);
-      return;
+      this.callbacks.onTaskCompleted?.(task, result.durationMs);
+    } finally {
+      stopHeartbeat();
     }
-
-    const payload = this.toPayload(task);
-    const executors = await this.getExecutionCandidates(task, enabledProviders);
-    if (executors.length === 0) {
-      throw new Error("No available Claude Code or Codex executor");
-    }
-
-    if (!task.acceptedCommentPostedAt) {
-      const posted = await this.postTaskAcceptedToIssue(task);
-      if (posted) {
-        await this.mutation("tasks:markAcceptedCommentPosted", {
-          taskId: task._id,
-        });
-      }
-    }
-
-    let result: ExecutionResult | null = null;
-    const errors: string[] = [];
-    for (const executor of executors) {
-      this.callbacks.onTaskRunning?.(task, executor.displayName);
-      this.callbacks.onTaskPreview?.(
-        task,
-        executor.displayName,
-        executor.previewCommand?.(payload) ?? "provider-managed execution"
-      );
-
-      if (executor instanceof ClaudeCodeExecutor) {
-        executor.setStreamCallback((content: string) => {
-          this.mutation("tasks:updateStream", {
-            taskId: task._id,
-            content,
-          }).catch(() => {});
-        });
-      }
-
-      try {
-        result = await executor.execute(payload);
-        break;
-      } catch (err) {
-        const message = `${executor.displayName}: ${(err as Error).message}`;
-        errors.push(message);
-        this.callbacks.onError?.(
-          new Error(
-            executors.length > 1
-              ? `${message}; trying next provider`
-              : message
-          )
-        );
-      }
-    }
-
-    if (!result) {
-      await this.mutation("tasks:fail", {
-        taskId: task._id,
-        error: errors.join("\n"),
-      });
-      throw new Error(errors.join("; "));
-    }
-
-    if (task.githubIssueUrl) {
-      await this.postResultToIssue(task, result.content);
-    }
-
-    await this.mutation("tasks:complete", {
-      taskId: task._id,
-      content: result.content,
-      executedByProvider: result.provider,
-      executedByModel: result.model ?? undefined,
-      executionDurationMs: result.durationMs,
-    });
-
-    this.tasksCompletedToday++;
-    this.callbacks.onTaskCompleted?.(task, result.durationMs);
   }
 
   private async getExecutionCandidates(
@@ -291,6 +307,65 @@ export class Daemon {
     return true;
   }
 
+  private async postTaskInterruptedToIssue(
+    task: Pick<RecoveredTask, "taskId" | "title" | "githubIssueUrl">,
+    reason: string
+  ): Promise<boolean> {
+    return await this.postTaskStatusToIssue(task.githubIssueUrl, {
+      event: "interrupted",
+      title: task.title,
+      reason,
+    });
+  }
+
+  private async postTaskFailedToIssue(
+    task: Pick<QueuedTask, "title" | "githubIssueUrl">,
+    reason: string
+  ): Promise<boolean> {
+    return await this.postTaskStatusToIssue(task.githubIssueUrl, {
+      event: "failed",
+      title: task.title,
+      reason: reason.slice(0, 1500),
+    });
+  }
+
+  private async postTaskStatusToIssue(
+    githubIssueUrl: string | undefined,
+    payload: Record<string, unknown>
+  ): Promise<boolean> {
+    if (!githubIssueUrl) return false;
+
+    const config = getConfig();
+    if (!config.appUrl) return false;
+    if (!this.authToken) await this.refreshAuth();
+
+    const res = await fetch(
+      `${config.appUrl.replace(/\/$/, "")}/api/github/task-status`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.authToken}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": "PromptRelay",
+        },
+        body: JSON.stringify({
+          githubIssueUrl,
+          ...payload,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      this.callbacks.onError?.(
+        new Error(`Failed to post task status: ${res.status}${text ? ` ${text}` : ""}`)
+      );
+      return false;
+    }
+    return true;
+  }
+
   private async postResultToIssue(task: QueuedTask, content: string): Promise<void> {
     if (!task.githubIssueUrl) return;
 
@@ -313,7 +388,10 @@ export class Daemon {
     });
 
     if (!res.ok) {
-      this.callbacks.onError?.(new Error(`Failed to post comment: ${res.status}`));
+      const text = await res.text().catch(() => "");
+      this.callbacks.onError?.(
+        new Error(`Failed to post comment: ${res.status}${text ? ` ${text}` : ""}`)
+      );
     }
   }
 
@@ -410,10 +488,44 @@ export class Daemon {
 
   private async recoverStaleTasks() {
     try {
-      await this.mutation("tasks:recoverStaleTasks", { limit: 50 });
+      const result = await this.mutation("tasks:recoverStaleTasks", {
+        limit: 50,
+      }) as { tasks?: RecoveredTask[] };
+      for (const task of result.tasks ?? []) {
+        if (
+          task.interruptedCommentPostedAt ||
+          this.notifiedInterruptedTaskIds.has(task.taskId)
+        ) {
+          continue;
+        }
+        const posted = await this.postTaskInterruptedToIssue(
+          task,
+          "No heartbeat was received before the claim expired."
+        );
+        if (posted) {
+          this.notifiedInterruptedTaskIds.add(task.taskId);
+          await this.mutation("tasks:markInterruptedCommentPosted", {
+            taskId: task.taskId,
+          });
+        }
+      }
     } catch (err) {
       this.callbacks.onError?.(err as Error);
     }
+  }
+
+  private startHeartbeat(task: QueuedTask): () => void {
+    let stopped = false;
+    const beat = () => {
+      if (stopped) return;
+      this.mutation("tasks:heartbeat", { taskId: task._id }).catch(() => {});
+    };
+    beat();
+    const interval = setInterval(beat, 30_000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
   }
 
   private pickTask(tasks: QueuedTask[]): QueuedTask {

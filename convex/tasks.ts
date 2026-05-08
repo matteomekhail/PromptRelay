@@ -9,6 +9,7 @@ const MAX_LIMIT = 100;
 const RESULTS_CONTEXT_LIMIT = 20;
 const CLAIM_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_TASK_ATTEMPTS = 3;
+const RECOVERED_DETAILS_LIMIT = 20;
 
 const priorityValidator = v.union(
   v.literal("low"),
@@ -136,7 +137,31 @@ export const markRunning = mutation({
     await ctx.db.patch(args.taskId, {
       status: "running",
       claimExpiresAt: Date.now() + CLAIM_TIMEOUT_MS,
+      lastHeartbeatAt: Date.now(),
       updatedAt: Date.now(),
+    });
+  },
+});
+
+export const heartbeat = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.claimedByVolunteerId !== user._id) throw new Error("Not your task");
+    if (task.status !== "claimed" && task.status !== "running") {
+      throw new Error("Task is not active");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.taskId, {
+      lastHeartbeatAt: now,
+      claimExpiresAt: now + CLAIM_TIMEOUT_MS,
+      updatedAt: now,
     });
   },
 });
@@ -154,6 +179,23 @@ export const markAcceptedCommentPosted = mutation({
 
     await ctx.db.patch(args.taskId, {
       acceptedCommentPostedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+export const markInterruptedCommentPosted = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    await requireCurrentUser(ctx);
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+
+    await ctx.db.patch(args.taskId, {
+      interruptedCommentPostedAt: Date.now(),
       updatedAt: Date.now(),
     });
   },
@@ -193,6 +235,7 @@ export const complete = mutation({
       claimExpiresAt: undefined,
       failedReason: undefined,
       streamingContent: undefined,
+      lastHeartbeatAt: undefined,
       executedByProvider: args.executedByProvider,
       executedByModel: args.executedByModel,
       executionDurationMs: args.executionDurationMs,
@@ -266,6 +309,7 @@ export const followUp = mutation({
       claimExpiresAt: undefined,
       failedReason: undefined,
       streamingContent: undefined,
+      lastHeartbeatAt: undefined,
       executedByProvider: undefined,
       executedByModel: undefined,
       executionDurationMs: undefined,
@@ -311,9 +355,11 @@ export const recoverStaleTasks = mutation({
     await requireCurrentUser(ctx);
     const now = Date.now();
     const limit = boundedLimit(args.limit);
-    const claimed = await recoverStaleByStatus(ctx, "claimed", now, limit);
-    const running = await recoverStaleByStatus(ctx, "running", now, limit);
-    return { recovered: claimed + running };
+    const recovered = [
+      ...(await recoverStaleByStatus(ctx, "claimed", now, limit)),
+      ...(await recoverStaleByStatus(ctx, "running", now, limit)),
+    ].slice(0, RECOVERED_DETAILS_LIMIT);
+    return { recovered: recovered.length, tasks: recovered };
   },
 });
 
@@ -330,11 +376,19 @@ async function recoverStaleByStatus(
     )
     .take(limit);
 
+  const recovered = [];
   for (const task of staleTasks) {
     await retryOrFail(ctx, task, "Claim expired before completion");
+    recovered.push({
+      taskId: task._id,
+      title: task.title,
+      githubIssueUrl: task.githubIssueUrl,
+      attempts: task.attempts ?? 0,
+      interruptedCommentPostedAt: task.interruptedCommentPostedAt,
+    });
   }
 
-  return staleTasks.length;
+  return recovered;
 }
 
 async function retryOrFail(ctx: MutationCtx, task: Doc<"tasks">, reason: string) {
@@ -349,6 +403,7 @@ async function retryOrFail(ctx: MutationCtx, task: Doc<"tasks">, reason: string)
     claimExpiresAt: undefined,
     failedReason: reason,
     streamingContent: undefined,
+    lastHeartbeatAt: undefined,
     updatedAt: Date.now(),
   });
 }
@@ -364,9 +419,23 @@ async function markTaskFailed(
     claimExpiresAt: undefined,
     failedReason: reason,
     streamingContent: undefined,
+    lastHeartbeatAt: undefined,
     updatedAt: Date.now(),
   });
 }
+
+export const currentForVolunteer = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await requireCurrentUser(ctx);
+    return await ctx.db
+      .query("tasks")
+      .withIndex("by_claimedByVolunteerId_and_status", (q) =>
+        q.eq("claimedByVolunteerId", user._id).eq("status", "running")
+      )
+      .take(5);
+  },
+});
 
 function boundedLimit(limit?: number) {
   return Math.min(Math.max(limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);

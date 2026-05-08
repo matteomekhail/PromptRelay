@@ -6,8 +6,9 @@ export const runtime = "nodejs";
 
 type TaskStatusPayload = {
   githubIssueUrl?: string;
-  event?: "accepted";
+  event?: "accepted" | "interrupted" | "failed";
   title?: string;
+  reason?: string;
 };
 
 export async function POST(req: NextRequest) {
@@ -20,7 +21,10 @@ export async function POST(req: NextRequest) {
 
     const verified = await verifyConvexAuthToken(token);
     const payload = (await req.json()) as TaskStatusPayload;
-    if (!payload.githubIssueUrl || payload.event !== "accepted") {
+    if (
+      !payload.githubIssueUrl ||
+      !["accepted", "interrupted", "failed"].includes(payload.event ?? "")
+    ) {
       return NextResponse.json({ error: "Invalid task status payload" }, { status: 400 });
     }
 
@@ -33,10 +37,7 @@ export async function POST(req: NextRequest) {
       parsedIssue.repo
     );
     const volunteer = getVolunteerUsername(verified.payload);
-    const body = formatAcceptedComment({
-      title: payload.title,
-      volunteer,
-    });
+    const body = formatStatusComment(payload, volunteer);
 
     const res = await fetch(
       `https://api.github.com/repos/${parsedIssue.repo}/issues/${parsedIssue.issueNumber}/comments`,
@@ -81,20 +82,30 @@ function getVolunteerUsername(payload: Record<string, unknown>) {
     : "a volunteer";
 }
 
-function formatAcceptedComment({
-  title,
-  volunteer,
-}: {
-  title?: string;
-  volunteer: string;
-}) {
+function formatStatusComment(payload: TaskStatusPayload, volunteer: string) {
+  if (payload.event === "interrupted") {
+    const lines = [
+      "Run interrupted.",
+      "",
+      "The volunteer CLI lost contact before completion. PromptRelay returned this task to the queue.",
+    ];
+    if (payload.reason) lines.push("", `Reason: ${payload.reason}`);
+    return lines.join("\n");
+  }
+
+  if (payload.event === "failed") {
+    const lines = ["Run failed."];
+    if (payload.reason) lines.push("", `Reason: ${payload.reason}`);
+    return lines.join("\n");
+  }
+
   const runner = volunteer === "a volunteer" ? volunteer : `@${volunteer}`;
   const lines = [
     `Picked up by ${runner}.`,
   ];
 
-  if (title) {
-    lines.push("", `Task: ${title}`);
+  if (payload.title) {
+    lines.push("", `Task: ${payload.title}`);
   }
 
   return lines.join("\n");

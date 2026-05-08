@@ -9,7 +9,7 @@ type ResultPayload = {
   content?: string;
 };
 
-const MAX_COMMENT_LENGTH = 60_000;
+const MAX_COMMENT_LENGTH = 55_000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -72,7 +72,11 @@ function parseGitHubIssueUrl(url: string) {
 }
 
 function formatResultComment(content: string) {
-  const body = `## PromptRelay result\n\n${content}`;
+  const safeContent = content.replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+    ""
+  );
+  const body = `## PromptRelay result\n\n${safeContent}`;
   if (body.length <= MAX_COMMENT_LENGTH) return body;
 
   return `${body.slice(0, MAX_COMMENT_LENGTH)}\n\n_Result truncated by PromptRelay._`;
