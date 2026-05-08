@@ -25,9 +25,8 @@ export default function HowItWorksPage() {
               promptrelay start
             </code>
             .
-            The daemon polls Convex for queued tasks matching the volunteer&apos;s
-            allowed categories (docs, tests, bugfix, review, refactor,
-            translation). Configuration lives in{" "}
+            The daemon polls Convex for queued tasks from trusted projects.
+            Configuration lives in{" "}
             <code className="text-foreground font-mono text-[13px]">
               ~/.config/promptrelay-volunteer
             </code>
@@ -42,12 +41,12 @@ export default function HowItWorksPage() {
           </h2>
           <p className="mt-3 text-muted-foreground">
             In a GitHub issue or pull request, a maintainer invokes PromptRelay
-            with a slash command such as{" "}
+            with a free-form prompt such as{" "}
             <code className="text-foreground font-mono text-[13px]">
-              /promptrelay review Focus on auth edge cases
+              @promptrelay add a regression test for the login callback
             </code>
-            . The GitHub webhook verifies the request, maps the command to a
-            task category and output type, and queues it in Convex with status{" "}
+            . The GitHub webhook verifies the request and queues the maintainer&apos;s
+            message in Convex with status{" "}
             <code className="text-foreground font-mono text-[13px]">queued</code>.
           </p>
         </div>
@@ -70,10 +69,11 @@ export default function HowItWorksPage() {
             <code className="text-foreground font-mono text-[13px]">
               codex --quiet --approval-mode full-auto {"<"}prompt{">"}
             </code>
-            ) as a child process inside the cloned repo. Claude Code gets a
-            system prompt with the project name and task category, reads the
-            codebase, and makes real file changes. Codex runs in full-auto
-            mode with an equivalent prompt. If the task has a{" "}
+            ) as a child process inside the cloned repo. The executor gets a
+            basic system prompt explaining that the repo is already cloned, that
+            it should follow the maintainer&apos;s prompt, and that PromptRelay will
+            handle commit, push, and PR creation if files are changed. If the task
+            has a{" "}
             <code className="text-foreground font-mono text-[13px]">publicRepoUrl</code>,
             the daemon clones or pulls the repo into{" "}
             <code className="text-foreground font-mono text-[13px]">
@@ -101,9 +101,10 @@ export default function HowItWorksPage() {
               tasks:complete
             </code>{" "}
             with the output content, provider used, model, and execution
-            duration. Review and answer tasks are posted back to the GitHub
-            thread as comments. Diff and PR-draft tasks can push a branch and
-            open a pull request via the GitHub CLI automatically.
+            duration. If execution only produces text, PromptRelay posts that
+            result back to the GitHub thread. If files changed, the daemon
+            commits the diff, pushes the working branch, and opens a pull
+            request via the GitHub CLI automatically.
           </p>
         </div>
 
@@ -115,8 +116,8 @@ export default function HowItWorksPage() {
             API keys, model access, and compute are the volunteer&apos;s. The
             platform stores task metadata, prompts, and results in Convex.
             No credentials cross the network. The volunteer&apos;s daemon controls
-            what it runs: category filters, daily limits, manual approval
-            mode, and a trusted-projects allowlist.
+            what it runs: daily limits, manual approval mode, enabled providers,
+            and a trusted-projects allowlist.
           </p>
         </div>
       </div>

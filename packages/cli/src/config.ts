@@ -12,7 +12,6 @@ export interface VolunteerConfig {
   convexUrl: string;
   appUrl: string;
   maxTasksPerDay: number;
-  allowedCategories: string[];
   providers: ProviderConfig[];
   autoApprove: boolean;
   trustedProjects: string[];
@@ -25,7 +24,6 @@ const defaults: VolunteerConfig = {
   convexUrl: process.env.PROMPTRELAY_CONVEX_URL ?? PRODUCTION_CONVEX_URL,
   appUrl: process.env.PROMPTRELAY_APP_URL ?? PRODUCTION_APP_URL,
   maxTasksPerDay: 10,
-  allowedCategories: ["docs", "tests", "bugfix", "review", "refactor", "translation"],
   providers: [
     { provider: "claude-code", enabled: true },
     { provider: "codex", enabled: true },

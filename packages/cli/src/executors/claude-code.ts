@@ -55,32 +55,19 @@ export class ClaudeCodeExecutor implements Executor {
 
   async execute(task: TaskPayload): Promise<ExecutionResult> {
     const start = Date.now();
-    const isReviewOnly = ["review", "answer"].includes(task.outputType);
 
     const workDir = await this.ensureRepo(task.publicRepoUrl);
 
     const systemPrompt = this.buildSystemPrompt(task);
     const userPrompt = this.buildUserPrompt(task);
 
-    if (isReviewOnly) {
-      // Review/answer: just read the code and respond, no branch or PR
-      const claudeOutput = await this.runStreaming(userPrompt, systemPrompt, workDir);
-      return {
-        content: claudeOutput || "No output produced.",
-        provider: "claude-code",
-        model: "claude-sonnet-4-6",
-        durationMs: Date.now() - start,
-      };
-    }
-
-    // Code change tasks: branch, execute, commit, PR
     const branchName = `promptrelay/${task.id.replace(/[^a-zA-Z0-9]/g, "-")}`;
     await this.ensureBranch(workDir, branchName);
 
     const claudeOutput = await this.runStreaming(userPrompt, systemPrompt, workDir);
     const diff = await this.captureDiff(workDir);
-    await this.commitChanges(workDir, task.title);
-    const prUrl = await this.pushAndCreatePR(workDir, branchName, task);
+    const hasChanges = diff !== "(no file changes)";
+    const prUrl = hasChanges ? await this.commitAndPushPR(workDir, branchName, task) : null;
     const content = this.formatResult(claudeOutput, diff, prUrl);
 
     return {
@@ -151,11 +138,26 @@ export class ClaudeCodeExecutor implements Executor {
     }
   }
 
+  private async commitAndPushPR(
+    workDir: string,
+    branchName: string,
+    task: TaskPayload
+  ): Promise<string | null> {
+    await this.commitChanges(workDir, task.title);
+    return await this.pushAndCreatePR(workDir, branchName, task);
+  }
+
   private async commitChanges(workDir: string, title: string): Promise<void> {
     try {
+      const { stdout: status } = await execAsync("git status --porcelain", {
+        cwd: workDir,
+        shell: "/bin/zsh",
+      });
+      if (!status.trim()) return;
+
       await execAsync("git add -A", { cwd: workDir, shell: "/bin/zsh" });
       const msg = `promptrelay: ${title}`.replace(/'/g, "");
-      await execAsync(`git commit -m '${msg}' --allow-empty`, {
+      await execAsync(`git commit -m '${msg}'`, {
         cwd: workDir, shell: "/bin/zsh",
       });
     } catch {
@@ -354,58 +356,15 @@ export class ClaudeCodeExecutor implements Executor {
   }
 
   private buildSystemPrompt(task: TaskPayload): string {
-    const base = `You are working on the open-source project at ${task.publicRepoUrl ?? "this repository"}.`;
-
-    const prompts: Record<string, string> = {
-      review: [
-        base,
-        "You are a senior code reviewer. Read the codebase and provide a thorough code review.",
-        "Focus on: bugs, security vulnerabilities, performance issues, code quality, and maintainability.",
-        "Structure your review with sections: Summary, Issues Found (critical/warning/info), and Recommendations.",
-        "Be specific — reference file names and line numbers. Do NOT modify any files.",
-      ].join("\n"),
-
-      docs: [
-        base,
-        "You are a technical writer. Read the codebase and generate or improve documentation.",
-        "Create or update README.md, API docs, inline JSDoc/docstrings, or usage guides as appropriate.",
-        "Write clear, concise documentation that helps new contributors get started quickly.",
-        "Actually create and write the documentation files. Do NOT just describe what you would write.",
-      ].join("\n"),
-
-      tests: [
-        base,
-        "You are a test engineer. Read the codebase and write comprehensive tests.",
-        "Identify untested code paths, edge cases, and critical functionality that needs coverage.",
-        "Use the project's existing test framework and conventions. If none exist, pick the standard one for the language.",
-        "Actually create the test files and write real, runnable tests. Do NOT just describe them.",
-      ].join("\n"),
-
-      bugfix: [
-        base,
-        "You are a debugging expert. Investigate the reported bug and implement a fix.",
-        "First reproduce/understand the issue by reading relevant code. Then implement the minimal fix.",
-        "Do NOT refactor unrelated code. Keep the change focused on the bug.",
-        "Actually modify the files to fix the bug. Do NOT just describe the fix.",
-      ].join("\n"),
-
-      refactor: [
-        base,
-        "You are a senior engineer performing a code refactoring.",
-        "Improve code structure, readability, and maintainability without changing external behavior.",
-        "Follow existing project conventions. Keep changes focused and reviewable.",
-        "Actually modify the files. Do NOT just describe what you would change.",
-      ].join("\n"),
-
-      translation: [
-        base,
-        "You are a localization specialist. Translate content as specified in the prompt.",
-        "Maintain the original formatting, structure, and technical terms where appropriate.",
-        "Actually create or modify the translation files. Do NOT just describe what you would translate.",
-      ].join("\n"),
-    };
-
-    return prompts[task.category] ?? prompts["review"];
+    return [
+      `You are working on the GitHub repository ${task.publicRepoUrl ?? "for this task"}.`,
+      "PromptRelay has already cloned or updated the repository and set your current working directory to that clone.",
+      "Follow the maintainer's prompt exactly.",
+      "If the prompt asks for code, docs, tests, fixes, refactors, or other repository changes, edit the files directly in the working tree.",
+      "If the prompt asks for analysis, review, or an answer, provide the response without changing files unless changes are explicitly requested.",
+      "Do not create commits, push branches, or open pull requests yourself. PromptRelay will commit, push, and open a PR automatically if you modify files.",
+      "Keep unrelated changes out of the worktree and summarize what you did.",
+    ].join("\n");
   }
 
   private buildUserPrompt(task: TaskPayload): string {

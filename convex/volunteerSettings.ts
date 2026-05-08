@@ -17,7 +17,6 @@ export const get = query({
 export const upsert = mutation({
   args: {
     maxTasksPerDay: v.number(),
-    allowedCategories: v.array(v.string()),
     trustedProjects: v.array(v.string()),
   },
   handler: async (ctx, args) => {
@@ -33,7 +32,6 @@ export const upsert = mutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         maxTasksPerDay: args.maxTasksPerDay,
-        allowedCategories: args.allowedCategories,
         trustedProjects: args.trustedProjects,
         updatedAt: now,
       });
@@ -43,7 +41,6 @@ export const upsert = mutation({
     return await ctx.db.insert("volunteerSettings", {
       volunteerId: user._id,
       maxTasksPerDay: args.maxTasksPerDay,
-      allowedCategories: args.allowedCategories,
       manualApprovalOnly: true,
       trustedProjects: args.trustedProjects,
       createdAt: now,

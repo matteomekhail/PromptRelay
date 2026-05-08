@@ -10,23 +10,6 @@ const RESULTS_CONTEXT_LIMIT = 20;
 const CLAIM_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_TASK_ATTEMPTS = 3;
 
-const categoryValidator = v.union(
-  v.literal("docs"),
-  v.literal("tests"),
-  v.literal("bugfix"),
-  v.literal("review"),
-  v.literal("refactor"),
-  v.literal("translation")
-);
-
-const outputTypeValidator = v.union(
-  v.literal("answer"),
-  v.literal("review"),
-  v.literal("markdown"),
-  v.literal("diff"),
-  v.literal("pr_draft")
-);
-
 const priorityValidator = v.union(
   v.literal("low"),
   v.literal("normal"),
@@ -38,8 +21,6 @@ export const create = mutation({
     projectId: v.id("projects"),
     title: v.string(),
     prompt: v.string(),
-    category: categoryValidator,
-    outputType: outputTypeValidator,
     priority: priorityValidator,
     publicRepoUrl: v.optional(v.string()),
     preferredProvider: v.optional(v.string()),
@@ -58,8 +39,6 @@ export const create = mutation({
       maintainerId: user._id,
       title: args.title,
       prompt: args.prompt,
-      category: args.category,
-      outputType: args.outputType,
       priority: args.priority,
       status: "queued",
       publicRepoUrl: args.publicRepoUrl,
@@ -296,8 +275,6 @@ export const requestPR = mutation({
       maintainerId: task.maintainerId,
       title: `[PR] ${task.title}`,
       prompt: `__PROMPTRELAY_FILE_PR__\nBranch: promptrelay/${task._id.replace(/[^a-zA-Z0-9]/g, "-")}\nTitle: ${task.title}`,
-      category: task.category,
-      outputType: "pr_draft",
       priority: "high",
       status: "queued",
       publicRepoUrl: task.publicRepoUrl,

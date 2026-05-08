@@ -2,8 +2,6 @@ export interface TaskPayload {
   id: string;
   title: string;
   prompt: string;
-  category: string;
-  outputType: string;
   projectName?: string;
   publicRepoUrl?: string;
   githubIssueUrl?: string;

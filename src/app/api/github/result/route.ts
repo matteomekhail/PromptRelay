@@ -6,7 +6,6 @@ export const runtime = "nodejs";
 
 type ResultPayload = {
   githubIssueUrl?: string;
-  category?: string;
   content?: string;
 };
 
@@ -23,7 +22,7 @@ export async function POST(req: NextRequest) {
     await verifyConvexAuthToken(token);
 
     const payload = (await req.json()) as ResultPayload;
-    if (!payload.githubIssueUrl || !payload.content || !payload.category) {
+    if (!payload.githubIssueUrl || !payload.content) {
       return NextResponse.json({ error: "Invalid result payload" }, { status: 400 });
     }
 
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest) {
     const installationToken = await createGitHubInstallationTokenForRepo(
       parsedIssue.repo
     );
-    const body = formatResultComment(payload.category, payload.content);
+    const body = formatResultComment(payload.content);
     const res = await fetch(
       `https://api.github.com/repos/${parsedIssue.repo}/issues/${parsedIssue.issueNumber}/comments`,
       {
@@ -72,8 +71,8 @@ function parseGitHubIssueUrl(url: string) {
   };
 }
 
-function formatResultComment(category: string, content: string) {
-  const body = `## PromptRelay — ${category}\n\n${content}`;
+function formatResultComment(content: string) {
+  const body = `## PromptRelay result\n\n${content}`;
   if (body.length <= MAX_COMMENT_LENGTH) return body;
 
   return `${body.slice(0, MAX_COMMENT_LENGTH)}\n\n_Result truncated by PromptRelay._`;

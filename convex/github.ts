@@ -6,21 +6,6 @@ export const createTaskFromGitHub = mutation({
     githubRepoFullName: v.string(),
     title: v.string(),
     prompt: v.string(),
-    category: v.union(
-      v.literal("docs"),
-      v.literal("tests"),
-      v.literal("bugfix"),
-      v.literal("review"),
-      v.literal("refactor"),
-      v.literal("translation")
-    ),
-    outputType: v.union(
-      v.literal("answer"),
-      v.literal("review"),
-      v.literal("markdown"),
-      v.literal("diff"),
-      v.literal("pr_draft")
-    ),
     priority: v.union(
       v.literal("low"),
       v.literal("normal"),
@@ -81,8 +66,6 @@ export const createTaskFromGitHub = mutation({
       maintainerId: project.maintainerId,
       title: args.title,
       prompt: args.prompt,
-      category: args.category,
-      outputType: args.outputType,
       priority: args.priority,
       status: "queued",
       publicRepoUrl: `https://github.com/${args.githubRepoFullName}`,

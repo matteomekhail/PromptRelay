@@ -50,8 +50,6 @@ export const seedDev = mutation({
       title: "Write unit tests for the relay handler",
       prompt:
         "Write comprehensive unit tests for the relay handler module in src/relay.ts. Cover edge cases including timeout, retry logic, and malformed payloads.",
-      category: "tests",
-      outputType: "diff",
       priority: "high",
       status: "queued",
       attempts: 0,
@@ -66,8 +64,6 @@ export const seedDev = mutation({
       title: "Review authentication middleware",
       prompt:
         "Review the authentication middleware in src/auth/middleware.ts for security issues, race conditions, and proper error handling.",
-      category: "review",
-      outputType: "review",
       priority: "normal",
       status: "queued",
       attempts: 0,
@@ -82,8 +78,6 @@ export const seedDev = mutation({
       title: "Generate API documentation",
       prompt:
         "Generate comprehensive markdown API documentation for the fast-cache library covering all public methods, configuration options, and usage examples.",
-      category: "docs",
-      outputType: "markdown",
       priority: "normal",
       status: "queued",
       attempts: 0,
@@ -97,8 +91,6 @@ export const seedDev = mutation({
       title: "Fix race condition in TTL cleanup",
       prompt:
         "There is a race condition in the TTL cleanup worker where expired entries may be served briefly after expiry. Investigate and provide a fix.",
-      category: "bugfix",
-      outputType: "pr_draft",
       priority: "high",
       status: "queued",
       attempts: 0,
@@ -109,7 +101,6 @@ export const seedDev = mutation({
     await ctx.db.insert("volunteerSettings", {
       volunteerId: volunteer,
       maxTasksPerDay: 5,
-      allowedCategories: ["docs", "tests", "review", "bugfix", "refactor", "translation"],
       manualApprovalOnly: true,
       trustedProjects: [],
       createdAt: now,

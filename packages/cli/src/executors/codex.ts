@@ -96,11 +96,10 @@ export class CodexExecutor implements Executor {
         }
       );
 
-      // Commit whatever codex changed
-      await this.commitChanges(workDir, task.title);
-
-      // Push and open PR
-      const prUrl = await this.pushAndCreatePR(workDir, branchName, task);
+      const hasChanges = await this.hasChanges(workDir);
+      const prUrl = hasChanges
+        ? await this.commitAndPushPR(workDir, branchName, task)
+        : null;
 
       let content = stdout.trim();
       if (prUrl) {
@@ -187,11 +186,30 @@ export class CodexExecutor implements Executor {
     }
   }
 
+  private async hasChanges(workDir: string): Promise<boolean> {
+    const { stdout } = await execAsync("git status --porcelain", {
+      cwd: workDir,
+      shell: "/bin/zsh",
+    });
+    return stdout.trim().length > 0;
+  }
+
+  private async commitAndPushPR(
+    workDir: string,
+    branchName: string,
+    task: TaskPayload
+  ): Promise<string | null> {
+    await this.commitChanges(workDir, task.title);
+    return await this.pushAndCreatePR(workDir, branchName, task);
+  }
+
   private async commitChanges(workDir: string, title: string): Promise<void> {
     try {
+      if (!(await this.hasChanges(workDir))) return;
+
       await execAsync("git add -A", { cwd: workDir, shell: "/bin/zsh" });
       const msg = `promptrelay: ${title}`.replace(/'/g, "");
-      await execAsync(`git commit -m '${msg}' --allow-empty`, {
+      await execAsync(`git commit -m '${msg}'`, {
         cwd: workDir, shell: "/bin/zsh",
       });
     } catch {}
@@ -244,18 +262,16 @@ export class CodexExecutor implements Executor {
   }
 
   private buildPrompt(task: TaskPayload): string {
-    const outputInstructions: Record<string, string> = {
-      answer: "Respond with a concise answer only.",
-      review: "Provide a structured code review.",
-      markdown: "Generate markdown documentation.",
-      diff: "Output only a unified diff.",
-      pr_draft: "Output a complete PR description with summary and diff.",
-    };
+    return `You are working on this GitHub repository with PromptRelay.
 
-    return `Task: ${task.title}
+PromptRelay has already cloned or updated the repository and set your current working directory to that clone.
+Follow the maintainer's prompt exactly.
+If the prompt asks for code, docs, tests, fixes, refactors, or other repository changes, edit files directly in the working tree.
+If the prompt asks for analysis, review, or an answer, respond without changing files unless changes are explicitly requested.
+Do not create commits, push branches, or open pull requests yourself. PromptRelay will commit, push, and open a PR automatically if you modify files.
+
+Task: ${task.title}
 Project: ${task.projectName ?? "unknown"}
-Category: ${task.category}
-Expected output: ${task.outputType} — ${outputInstructions[task.outputType] ?? ""}
 ${task.publicRepoUrl ? `Repo: ${task.publicRepoUrl}` : ""}
 
 ${task.prompt}`;

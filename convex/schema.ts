@@ -35,21 +35,6 @@ export default defineSchema({
     maintainerId: v.id("users"),
     title: v.string(),
     prompt: v.string(),
-    category: v.union(
-      v.literal("docs"),
-      v.literal("tests"),
-      v.literal("bugfix"),
-      v.literal("review"),
-      v.literal("refactor"),
-      v.literal("translation")
-    ),
-    outputType: v.union(
-      v.literal("answer"),
-      v.literal("review"),
-      v.literal("markdown"),
-      v.literal("diff"),
-      v.literal("pr_draft")
-    ),
     priority: v.union(
       v.literal("low"),
       v.literal("normal"),
@@ -87,7 +72,6 @@ export default defineSchema({
   volunteerSettings: defineTable({
     volunteerId: v.id("users"),
     maxTasksPerDay: v.number(),
-    allowedCategories: v.array(v.string()),
     availableProviders: v.optional(v.array(v.string())),
     manualApprovalOnly: v.boolean(),
     trustedProjects: v.array(v.string()),

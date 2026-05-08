@@ -11,8 +11,6 @@ interface QueuedTask {
   _id: string;
   title: string;
   prompt: string;
-  category: string;
-  outputType: string;
   priority: string;
   projectId: string;
   publicRepoUrl?: string;
@@ -210,9 +208,7 @@ export class Daemon {
       throw new Error(errors.join("; "));
     }
 
-    // For review/answer tasks, post result as a comment on the issue instead of PR
-    const commentOnlyTypes = ["review", "answer"];
-    if (commentOnlyTypes.includes(task.outputType) && task.githubIssueUrl) {
+    if (task.githubIssueUrl) {
       await this.postResultToIssue(task, result.content);
     }
 
@@ -304,7 +300,6 @@ export class Daemon {
       },
       body: JSON.stringify({
         githubIssueUrl: task.githubIssueUrl,
-        category: task.category,
         content,
       }),
     });
@@ -355,10 +350,7 @@ export class Daemon {
     tasks: QueuedTask[],
     config: ReturnType<typeof getConfig>
   ): QueuedTask[] {
-    return tasks.filter((t) =>
-      config.allowedCategories.includes(t.category) &&
-      this.isTrustedTask(t, config.trustedProjects)
-    );
+    return tasks.filter((t) => this.isTrustedTask(t, config.trustedProjects));
   }
 
   private isTrustedTask(task: QueuedTask, trustedProjects: string[]): boolean {
@@ -386,8 +378,6 @@ export class Daemon {
       id: task._id,
       title: task.title,
       prompt: task.prompt,
-      category: task.category,
-      outputType: task.outputType,
       publicRepoUrl: task.publicRepoUrl,
       githubIssueUrl: task.githubIssueUrl,
     };

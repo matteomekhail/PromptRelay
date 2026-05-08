@@ -6,9 +6,6 @@ export const runtime = "nodejs";
 const DEFAULT_COMMAND_SLUG = "promptrelay";
 
 interface ParsedCommand {
-  action: string;
-  category: "docs" | "tests" | "bugfix" | "review" | "refactor" | "translation";
-  outputType: "answer" | "review" | "markdown" | "diff" | "pr_draft";
   prompt: string;
 }
 
@@ -25,16 +22,6 @@ type GitHubWebhookPayload = {
   };
   issue?: { number?: number; title?: string; html_url?: string };
   pull_request?: { number?: number; title?: string; html_url?: string };
-};
-
-const ACTION_MAP: Record<string, { category: ParsedCommand["category"]; outputType: ParsedCommand["outputType"] }> = {
-  review: { category: "review", outputType: "review" },
-  docs: { category: "docs", outputType: "markdown" },
-  tests: { category: "tests", outputType: "diff" },
-  fix: { category: "bugfix", outputType: "pr_draft" },
-  refactor: { category: "refactor", outputType: "diff" },
-  translate: { category: "translation", outputType: "markdown" },
-  help: { category: "docs", outputType: "answer" },
 };
 
 export async function POST(req: NextRequest) {
@@ -126,10 +113,8 @@ export async function POST(req: NextRequest) {
           path: "github:createTaskFromGitHub",
           args: {
             githubRepoFullName: repoFullName,
-            title: `[${parsed.action}] ${issueTitle}`,
+            title: issueTitle,
             prompt: parsed.prompt,
-            category: parsed.category,
-            outputType: parsed.outputType,
             priority: "normal",
             githubIssueUrl: issueUrl,
             githubCommentId: payload.comment?.id,
@@ -162,7 +147,7 @@ export async function POST(req: NextRequest) {
       const commentResult = await postComment(
         repoFullName,
         payload.issue?.number ?? payload.pull_request?.number,
-        `Task queued. A volunteer can approve and run it locally.\n\n**${parsed.action}** -> \`${parsed.outputType}\``,
+        "Task queued. A volunteer can approve and run it locally.",
         installationToken
       );
 
@@ -242,21 +227,15 @@ function parseCommand(comment: string): ParsedCommand | null {
   const command = extractCommand(comment);
   if (!command) return null;
 
-  const parts = command.firstLine.split(/\s+/).filter(Boolean);
-  const action = parts[0]?.toLowerCase();
-
-  if (!action || !ACTION_MAP[action]) {
+  const prompt = [command.firstLine, command.remainingLines]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  if (!prompt) {
     return null;
   }
 
-  const { category, outputType } = ACTION_MAP[action];
-
-  // Everything after the command is the prompt context
-  const inlineContext = parts.slice(1).join(" ");
-  const prompt = [inlineContext, command.remainingLines].filter(Boolean).join("\n") ||
-    `Perform a ${action} on this issue/PR.`;
-
-  return { action, category, outputType, prompt };
+  return { prompt };
 }
 
 function hasCommandTrigger(comment: string): boolean {
@@ -294,20 +273,12 @@ function escapeRegExp(value: string): string {
 }
 
 function formatHelp(): string {
-  return `**PromptRelay** — available commands:
+  return `**PromptRelay**
 
-| Command | What it does |
-|---------|-------------|
-| \`@promptrelay review\` or \`/promptrelay review\` | Code review |
-| \`@promptrelay docs\` or \`/promptrelay docs\` | Generate documentation |
-| \`@promptrelay tests\` or \`/promptrelay tests\` | Generate tests |
-| \`@promptrelay fix\` or \`/promptrelay fix\` | Suggest a bugfix (PR draft) |
-| \`@promptrelay refactor\` or \`/promptrelay refactor\` | Suggest refactoring |
-| \`@promptrelay translate\` or \`/promptrelay translate\` | Translate content |
+Write the task after \`@promptrelay\`:
 
-Add context after the command:
 \`\`\`
-@promptrelay review Focus on error handling and race conditions
+@promptrelay add a regression test for the login callback and open a PR
 \`\`\``;
 }
 
