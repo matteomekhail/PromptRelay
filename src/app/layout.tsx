@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { Providers } from "@/components/providers";
 import { Navbar } from "@/components/navbar";
 import "./globals.css";
 
@@ -32,10 +31,8 @@ export default function RootLayout({
       className={`${neueMontreal.variable} ${migra.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <Providers>
-          <Navbar />
-          <main className="flex-1">{children}</main>
-        </Providers>
+        <Navbar />
+        <main className="flex-1">{children}</main>
       </body>
     </html>
   );

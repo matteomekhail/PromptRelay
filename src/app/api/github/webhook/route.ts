@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createGitHubInstallationToken } from "@/lib/github-app";
+
+export const runtime = "nodejs";
 
 const COMMAND_PREFIX = "/promptrelay";
 
@@ -8,6 +11,21 @@ interface ParsedCommand {
   outputType: "answer" | "review" | "markdown" | "diff" | "pr_draft";
   prompt: string;
 }
+
+type GitHubWebhookPayload = {
+  action?: string;
+  installation?: { id?: number };
+  repository?: { full_name?: string };
+  sender?: { id?: number; login?: string };
+  comment?: {
+    id?: number;
+    body?: string;
+    author_association?: string;
+    user?: { id?: number; login?: string };
+  };
+  issue?: { number?: number; title?: string; html_url?: string };
+  pull_request?: { number?: number; title?: string; html_url?: string };
+};
 
 const ACTION_MAP: Record<string, { category: ParsedCommand["category"]; outputType: ParsedCommand["outputType"] }> = {
   review: { category: "review", outputType: "review" },
@@ -41,7 +59,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, skipped: true });
     }
 
-    const payload = JSON.parse(body);
+    const payload = JSON.parse(body) as GitHubWebhookPayload;
 
     if (payload.action !== "created") {
       return NextResponse.json({ ok: true, skipped: true });
@@ -57,12 +75,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No repo" }, { status: 400 });
     }
 
+    const installationId = payload.installation?.id;
+    if (!installationId) {
+      return NextResponse.json({ error: "No installation" }, { status: 400 });
+    }
+    const installationToken =
+      await createGitHubInstallationToken(installationId);
+
     const callerGithubUsername =
       payload.comment?.user?.login ?? payload.sender?.login ?? "unknown";
     const authorized = await isAuthorizedMaintainer(
       repoFullName,
       callerGithubUsername,
-      payload.comment?.author_association
+      installationToken
     );
     if (!authorized) {
       return NextResponse.json({ ok: true, skipped: "unauthorized-commenter" });
@@ -73,7 +98,8 @@ export async function POST(req: NextRequest) {
       await postComment(
         repoFullName,
         payload.issue?.number ?? payload.pull_request?.number,
-        formatHelp()
+        formatHelp(),
+        installationToken
       );
       return NextResponse.json({ ok: true, replied: "help" });
     }
@@ -114,12 +140,14 @@ export async function POST(req: NextRequest) {
 
       const reactResult = await reactToComment(
         repoFullName,
-        payload.comment?.id
+        payload.comment?.id,
+        installationToken
       );
       const commentResult = await postComment(
         repoFullName,
         payload.issue?.number ?? payload.pull_request?.number,
-        `Task queued. A volunteer can approve and run it locally.\n\n**${parsed.action}** -> \`${parsed.outputType}\``
+        `Task queued. A volunteer can approve and run it locally.\n\n**${parsed.action}** -> \`${parsed.outputType}\``,
+        installationToken
       );
 
       return NextResponse.json({
@@ -134,7 +162,8 @@ export async function POST(req: NextRequest) {
       await postComment(
         repoFullName,
         payload.issue?.number ?? payload.pull_request?.number,
-        `Something went wrong: ${message}`
+        `Something went wrong: ${message}`,
+        installationToken
       );
 
       return NextResponse.json({ error: message }, { status: 400 });
@@ -147,16 +176,9 @@ export async function POST(req: NextRequest) {
 async function isAuthorizedMaintainer(
   repo: string,
   username: string,
-  authorAssociation: string | undefined
+  token: string
 ) {
-  if (
-    ["OWNER", "MEMBER", "COLLABORATOR"].includes(authorAssociation ?? "")
-  ) {
-    return true;
-  }
-
-  const token = process.env.GITHUB_APP_TOKEN;
-  if (!token || username === "unknown") return false;
+  if (username === "unknown") return false;
 
   const res = await fetch(
     `https://api.github.com/repos/${repo}/collaborators/${username}/permission`,
@@ -241,10 +263,13 @@ Add context after the command:
 \`\`\``;
 }
 
-async function postComment(repo: string, issueNumber: number, body: string) {
-  const token = process.env.GITHUB_APP_TOKEN;
-  if (!token) return { error: "no token" };
-
+async function postComment(
+  repo: string,
+  issueNumber: number | undefined,
+  body: string,
+  token: string
+) {
+  if (!issueNumber) return { error: "no issue number" };
   const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
     method: "POST",
     headers: {
@@ -261,10 +286,12 @@ async function postComment(repo: string, issueNumber: number, body: string) {
   return { ok: true };
 }
 
-async function reactToComment(repo: string, commentId: number) {
-  const token = process.env.GITHUB_APP_TOKEN;
-  if (!token) return { error: "no token" };
-
+async function reactToComment(
+  repo: string,
+  commentId: number | undefined,
+  token: string
+) {
+  if (!commentId) return { error: "no comment id" };
   const res = await fetch(
     `https://api.github.com/repos/${repo}/issues/comments/${commentId}/reactions`,
     {

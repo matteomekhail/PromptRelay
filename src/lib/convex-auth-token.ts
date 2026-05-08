@@ -15,7 +15,6 @@ const TOKEN_TTL_SECONDS = 60 * 60;
 export function getConvexAuthIssuer() {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ??
-    process.env.NEXTAUTH_URL ??
     "http://localhost:3000";
   return appUrl.replace(/\/$/, "");
 }

@@ -9,7 +9,6 @@ Maintainers submit public AI tasks from GitHub issues and pull requests with `/p
 - **Next.js 16** (API routes and minimal static docs)
 - **Tailwind CSS** + **shadcn/ui** (base-ui)
 - **Convex** (database, backend functions)
-- **Auth.js v5** (NextAuth) with GitHub OAuth
 - **Zod** for form validation
 
 ## Setup
@@ -18,7 +17,8 @@ Maintainers submit public AI tasks from GitHub issues and pull requests with `/p
 
 - Node.js 18+
 - npm
-- A GitHub OAuth App
+- A GitHub App for repository installation and webhooks
+- A GitHub OAuth App client ID for volunteer CLI device flow
 
 ### 1. Install dependencies
 
@@ -26,17 +26,36 @@ Maintainers submit public AI tasks from GitHub issues and pull requests with `/p
 npm install
 ```
 
-### 2. Create a GitHub OAuth App
+### 2. Create a GitHub App
+
+1. Go to https://github.com/settings/apps/new
+2. Set:
+   - GitHub App name: `PromptRelay`
+   - Homepage URL: your public app URL
+   - Webhook URL: `https://your-domain.com/api/github/webhook`
+   - Webhook secret: a long random string
+3. Enable repository permissions:
+   - Metadata: read-only
+   - Issues: read/write
+   - Pull requests: read/write
+   - Contents: read/write
+4. Subscribe to:
+   - Issue comment
+   - Pull request review comment
+   - Pull request
+5. Generate and download a private key.
+
+### 3. Create a GitHub OAuth App for the CLI
 
 1. Go to https://github.com/settings/developers
 2. Click "New OAuth App"
 3. Set:
-   - Application name: `PromptRelay (dev)`
-   - Homepage URL: `http://localhost:3000`
-   - Authorization callback URL: `http://localhost:3000/api/auth/callback/github`
-4. Copy the Client ID and generate a Client Secret
+   - Application name: `PromptRelay CLI`
+   - Homepage URL: your public app URL
+   - Authorization callback URL: your public app URL
+4. Copy the Client ID. The CLI uses GitHub device flow and does not need a client secret.
 
-### 3. Configure environment variables
+### 4. Configure environment variables
 
 Copy `.env.example` to `.env.local` and fill in:
 
@@ -47,12 +66,10 @@ cp .env.example .env.local
 Required variables:
 - `NEXT_PUBLIC_CONVEX_URL` — set by `npx convex init` or `npx convex dev`
 - `CONVEX_DEPLOYMENT` — set by Convex CLI
-- `GITHUB_CLIENT_ID` — from your GitHub OAuth App
-- `GITHUB_CLIENT_SECRET` — from your GitHub OAuth App
-- `AUTH_SECRET` — generate with `npx auth secret`
-- `NEXTAUTH_URL` — `http://localhost:3000` for local dev
 - `NEXT_PUBLIC_APP_URL` — public app URL used as the Convex auth issuer
 - `CONVEX_AUTH_PRIVATE_KEY` — RSA private key used to sign Convex auth JWTs
+- `GITHUB_APP_ID` — from your GitHub App settings
+- `GITHUB_APP_PRIVATE_KEY` — the downloaded GitHub App private key PEM, or a base64-encoded PEM
 - `GITHUB_WEBHOOK_SECRET` — shared secret used by GitHub webhook signature verification and Convex task creation
 
 Convex also needs the auth issuer URL in its deployment environment because
@@ -69,7 +86,7 @@ For the volunteer CLI, also set:
 - `PROMPTRELAY_CONVEX_URL` — Convex deployment URL
 - `PROMPTRELAY_GITHUB_CLIENT_ID` — GitHub OAuth device-flow app client ID
 
-### 4. Start Convex
+### 5. Start Convex
 
 In one terminal:
 
@@ -77,7 +94,7 @@ In one terminal:
 npx convex dev
 ```
 
-### 5. Start Next.js
+### 6. Start Next.js
 
 In another terminal:
 
@@ -85,7 +102,7 @@ In another terminal:
 npm run dev
 ```
 
-### 6. Seed sample data (optional)
+### 7. Seed sample data (optional)
 
 Open the Convex dashboard and run the `seed:seedDev` mutation, or call it from a script:
 
@@ -133,7 +150,7 @@ for static documentation and machine endpoints:
 | Route | Description |
 |-------|-------------|
 | `/api/github/webhook` | GitHub slash-command webhook |
-| `/api/convex/token` | GitHub token/session to Convex JWT bridge |
+| `/api/convex/token` | GitHub bearer token to Convex JWT bridge |
 | `/api/convex/jwks` | JWKS for Convex auth |
 | `/.well-known/openid-configuration` | OIDC metadata for Convex auth |
 
@@ -151,7 +168,7 @@ Run the daemon explicitly with `promptrelay start`, or use
 ## MVP Limitations
 
 - No maintainer web UI by design; GitHub is the maintainer interface
-- GitHub App integration is still minimal and currently expects a configured webhook secret plus GitHub token
+- GitHub App integration uses installation tokens for webhook comments and permission checks
 - CLI execution is restricted to trusted repositories by default
 - Public/open-source content only
 
