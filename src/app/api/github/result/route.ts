@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     await verifyConvexAuthToken(token);
 
     const payload = (await req.json()) as ResultPayload;
-    if (!payload.githubIssueUrl || !payload.content) {
+    if (!payload.githubIssueUrl || typeof payload.content !== "string") {
       return NextResponse.json({ error: "Invalid result payload" }, { status: 400 });
     }
 
@@ -75,7 +75,7 @@ function formatResultComment(content: string) {
   const safeContent = content.replace(
     /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
     ""
-  );
+  ).trim() || "No textual result was produced.";
   const body = `## PromptRelay result\n\n${safeContent}`;
   if (body.length <= MAX_COMMENT_LENGTH) return body;
 

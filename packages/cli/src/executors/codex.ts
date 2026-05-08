@@ -111,6 +111,7 @@ export class CodexExecutor implements Executor {
       if (prUrl) {
         content += `\n\n---\n\n**PR opened:** ${prUrl}`;
       }
+      content = content.trim() || "No output or changes produced.";
 
       return {
         content,
