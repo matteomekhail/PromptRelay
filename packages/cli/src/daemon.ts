@@ -1,12 +1,18 @@
 import { ConvexClient } from "convex/browser";
 import { ConvexHttpClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
+import { exec } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { getConfig, getEnabledProviders } from "./config.js";
 import { getConvexAuthToken } from "./convex-auth.js";
 import { selectExecutor, getExecutor } from "./executors/index.js";
 import { ClaudeCodeExecutor } from "./executors/claude-code.js";
 import { openForkPullRequest } from "./executors/github-pr.js";
 import type { Executor, ExecutionResult, TaskPayload } from "./executors/types.js";
+
+const execAsync = promisify(exec);
 
 interface QueuedTask {
   _id: string;
@@ -28,6 +34,11 @@ interface RecoveredTask {
   githubIssueUrl?: string;
   attempts: number;
   interruptedCommentPostedAt?: number;
+}
+
+interface DirtyWorktree {
+  path: string;
+  status: string;
 }
 
 interface DaemonCallbacks {
@@ -211,6 +222,26 @@ export class Daemon {
         } catch (err) {
           const message = `${executor.displayName}: ${(err as Error).message}`;
           errors.push(message);
+          const dirtyWorktree = await this.getDirtyWorktree(task);
+          if (dirtyWorktree) {
+            const error = [
+              message,
+              "",
+              "PromptRelay stopped this task because the provider left partial local changes.",
+              "The task will not be retried or handed to another provider until the worktree is inspected or cleaned.",
+              "",
+              `Worktree: ${dirtyWorktree.path}`,
+              "",
+              "Changed files:",
+              dirtyWorktree.status,
+            ].join("\n");
+            await this.mutation("tasks:failTerminal", {
+              taskId: task._id,
+              error,
+            });
+            await this.postTaskFailedToIssue(task, error);
+            throw new Error(error);
+          }
           this.callbacks.onError?.(
             new Error(
               executors.length > 1
@@ -460,6 +491,30 @@ export class Daemon {
   private repoSlug(repoUrl: string): string | null {
     const match = repoUrl.match(/github\.com\/([^/]+\/[^/.]+)(?:\.git)?/);
     return match?.[1] ?? null;
+  }
+
+  private async getDirtyWorktree(task: QueuedTask): Promise<DirtyWorktree | null> {
+    if (!task.publicRepoUrl) return null;
+    const repo = this.repoSlug(task.publicRepoUrl);
+    if (!repo) return null;
+
+    const path = join(
+      homedir(),
+      ".promptrelay",
+      "repos",
+      repo.replace("/", "__")
+    );
+
+    try {
+      const { stdout } = await execAsync("git status --porcelain", {
+        cwd: path,
+        shell: "/bin/zsh",
+      });
+      const status = stdout.trim();
+      return status ? { path, status } : null;
+    } catch {
+      return null;
+    }
   }
 
   private toPayload(task: QueuedTask): TaskPayload {

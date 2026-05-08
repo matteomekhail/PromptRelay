@@ -259,6 +259,21 @@ export const fail = mutation({
   },
 });
 
+export const failTerminal = mutation({
+  args: {
+    taskId: v.id("tasks"),
+    error: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.claimedByVolunteerId !== user._id) throw new Error("Not your task");
+
+    await markTaskFailed(ctx, task._id, args.error);
+  },
+});
+
 export const updateStream = mutation({
   args: {
     taskId: v.id("tasks"),
