@@ -24,6 +24,7 @@ interface QueuedTask {
 
 interface DaemonCallbacks {
   onTaskFound?: (task: QueuedTask) => void;
+  onTaskApprovalRequired?: (task: QueuedTask) => boolean | Promise<boolean>;
   onTaskClaimed?: (task: QueuedTask) => void;
   onTaskRunning?: (task: QueuedTask, provider: string) => void;
   onTaskPreview?: (task: QueuedTask, provider: string, command: string) => void;
@@ -42,6 +43,7 @@ export class Daemon {
   private tasksCompletedToday = 0;
   private lastDayReset = new Date().toDateString();
   private callbacks: DaemonCallbacks;
+  private dismissedTaskIds = new Set<string>();
 
   constructor(callbacks: DaemonCallbacks = {}) {
     const config = getConfig();
@@ -102,7 +104,9 @@ export class Daemon {
       return;
     }
 
-    const eligible = this.filterTasks(tasks, config);
+    const eligible = this.filterTasks(tasks, config).filter(
+      (task) => !this.dismissedTaskIds.has(task._id)
+    );
     if (eligible.length === 0) {
       this.callbacks.onIdle?.();
       return;
@@ -110,6 +114,15 @@ export class Daemon {
 
     const task = this.pickTask(eligible);
     this.callbacks.onTaskFound?.(task);
+
+    if (!config.autoApprove) {
+      const approved = await this.callbacks.onTaskApprovalRequired?.(task);
+      if (!approved) {
+        this.dismissedTaskIds.add(task._id);
+        this.callbacks.onIdle?.();
+        return;
+      }
+    }
 
     this.executing = true;
     try {

@@ -7,8 +7,9 @@ export default function HowItWorksPage() {
 
       <p className="mt-6 text-[15px] leading-7 text-muted-foreground max-w-[38rem]">
         PromptRelay coordinates AI execution between maintainers and
-        volunteers. The platform never touches credentials, code, or compute.
-        It only routes tasks and collects results.
+        volunteers. GitHub is the maintainer interface; the volunteer CLI/TUI is
+        the execution interface. The platform never touches provider
+        credentials or compute. It only routes tasks and collects results.
       </p>
 
       <div className="mt-14 space-y-12 text-[15px] leading-7">
@@ -17,8 +18,9 @@ export default function HowItWorksPage() {
             1. Volunteer installs the CLI daemon
           </h2>
           <p className="mt-3 text-muted-foreground">
-            A volunteer opens the settings TUI, authenticates via GitHub OAuth,
-            and configures their local daemon. The daemon is started explicitly with{" "}
+            A volunteer opens the settings TUI, authenticates via GitHub device
+            flow, and configures their local daemon. The daemon is started
+            explicitly with{" "}
             <code className="text-foreground font-mono text-[13px]">
               promptrelay start
             </code>
@@ -29,8 +31,8 @@ export default function HowItWorksPage() {
             <code className="text-foreground font-mono text-[13px]">
               ~/.config/promptrelay-volunteer
             </code>
-            , including max tasks per day, trusted projects, and enabled
-            providers.
+            , including max tasks per day, trusted projects, manual approval,
+            and enabled providers.
           </p>
         </div>
 
@@ -39,11 +41,14 @@ export default function HowItWorksPage() {
             2. Maintainer creates a task
           </h2>
           <p className="mt-3 text-muted-foreground">
-            Through the web dashboard, a maintainer links a GitHub repo,
-            writes a prompt, and selects a category and output type (answer,
-            review, markdown, diff, or PR draft). The task enters the queue
-            with status <code className="text-foreground font-mono text-[13px]">queued</code>.
-            Maintainers can optionally specify a preferred provider or model.
+            In a GitHub issue or pull request, a maintainer invokes PromptRelay
+            with a slash command such as{" "}
+            <code className="text-foreground font-mono text-[13px]">
+              /promptrelay review Focus on auth edge cases
+            </code>
+            . The GitHub webhook verifies the request, maps the command to a
+            task category and output type, and queues it in Convex with status{" "}
+            <code className="text-foreground font-mono text-[13px]">queued</code>.
           </p>
         </div>
 
@@ -52,8 +57,10 @@ export default function HowItWorksPage() {
             3. Daemon claims and executes
           </h2>
           <p className="mt-3 text-muted-foreground">
-            When the daemon finds an eligible task, it claims it (status moves
-            to <code className="text-foreground font-mono text-[13px]">claimed</code>,
+            When the daemon finds an eligible task, the volunteer approves it
+            unless auto-approve is enabled. After approval, it claims the task
+            (status moves to{" "}
+            <code className="text-foreground font-mono text-[13px]">claimed</code>,
             then <code className="text-foreground font-mono text-[13px]">running</code>).
             Under the hood, the executor spawns{" "}
             <code className="text-foreground font-mono text-[13px]">
@@ -86,7 +93,7 @@ export default function HowItWorksPage() {
 
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            4. Result submitted for review
+            4. Result posted back to GitHub
           </h2>
           <p className="mt-3 text-muted-foreground">
             On completion, the daemon writes the result back through{" "}
@@ -94,9 +101,9 @@ export default function HowItWorksPage() {
               tasks:complete
             </code>{" "}
             with the output content, provider used, model, and execution
-            duration. The maintainer reviews the result and accepts or
-            rejects it. For diff/PR outputs, the daemon can push a branch
-            and open a pull request via the GitHub CLI automatically.
+            duration. Review and answer tasks are posted back to the GitHub
+            thread as comments. Diff and PR-draft tasks can push a branch and
+            open a pull request via the GitHub CLI automatically.
           </p>
         </div>
 

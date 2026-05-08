@@ -30,8 +30,14 @@ export const createTaskFromGitHub = mutation({
     githubCommentId: v.optional(v.number()),
     callerGithubId: v.string(),
     callerGithubUsername: v.string(),
+    webhookSecret: v.string(),
   },
   handler: async (ctx, args) => {
+    const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+    if (!webhookSecret || args.webhookSecret !== webhookSecret) {
+      throw new Error("Invalid webhook secret");
+    }
+
     let project = await ctx.db
       .query("projects")
       .withIndex("by_githubRepo", (q) =>

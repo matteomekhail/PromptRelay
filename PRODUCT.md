@@ -12,7 +12,7 @@ Both audiences are technical, skeptical of platforms that collect credentials, a
 
 ## Product Purpose
 
-PromptRelay is a volunteer AI execution network. Maintainers post public AI tasks; volunteers approve and run them locally using their own AI setup. No credential sharing, no server-side execution. The platform coordinates work, not compute.
+PromptRelay is a GitHub-native volunteer AI execution network. Maintainers post public AI tasks from issues and pull requests; volunteers approve and run them locally using their own AI setup. No credential sharing, no server-side execution. The platform coordinates work, not compute.
 
 Success looks like: a thriving exchange where maintainers get high-quality AI-generated results (reviews, diffs, docs) without sharing API keys, and volunteers contribute meaningfully to open source.
 

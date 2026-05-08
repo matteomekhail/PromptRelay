@@ -2,6 +2,8 @@
 import chalk from "chalk";
 import ora from "ora";
 import type { FunctionReference } from "convex/server";
+import readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 import { loginWithDeviceFlow } from "./auth.js";
 import {
   getConfig,
@@ -116,6 +118,13 @@ async function main() {
     return;
   }
 
+  if (!config.autoApprove) {
+    console.log(chalk.dim("\n  Manual approval is enabled; running in foreground.\n"));
+    console.log(chalk.dim("  Enable auto-approve in `promptrelay` settings to install a background service.\n"));
+    await runForeground();
+    return;
+  }
+
   // Default: install as background service
   console.log(chalk.dim("\n  Installing background service...\n"));
 
@@ -146,6 +155,22 @@ async function runForeground() {
   const daemon = new Daemon({
     onTaskFound: (task) => {
       log(`${chalk.cyan("→")} Found: ${task.title} [${task.priority}]`);
+    },
+    onTaskApprovalRequired: async (task) => {
+      if (!process.stdin.isTTY) {
+        log(`${chalk.yellow("!")} Manual approval required; skipping ${task.title}`);
+        return false;
+      }
+
+      const rl = readline.createInterface({ input, output });
+      try {
+        const answer = await rl.question(
+          `  Run this task locally? ${chalk.bold(task.title)} [y/N]: `
+        );
+        return ["y", "yes"].includes(answer.trim().toLowerCase());
+      } finally {
+        rl.close();
+      }
     },
     onTaskClaimed: (task) => {
       log(`${chalk.blue("◆")} Claimed: ${task.title}`);

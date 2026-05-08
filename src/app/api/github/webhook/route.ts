@@ -21,114 +21,183 @@ const ACTION_MAP: Record<string, { category: ParsedCommand["category"]; outputTy
 
 export async function POST(req: NextRequest) {
   try {
-  const body = await req.text();
+    const body = await req.text();
 
-  // Verify webhook signature if secret is configured
-  const secret = process.env.GITHUB_WEBHOOK_SECRET;
-  if (secret) {
+    const secret = process.env.GITHUB_WEBHOOK_SECRET;
+    if (!secret) {
+      return NextResponse.json(
+        { error: "GITHUB_WEBHOOK_SECRET is not configured" },
+        { status: 500 }
+      );
+    }
+
     const signature = req.headers.get("x-hub-signature-256");
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      "raw",
-      encoder.encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"]
-    );
-    const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
-    const expected = "sha256=" + Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
-    if (signature !== expected) {
+    if (!(await verifyGitHubSignature(body, signature, secret))) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }
-  }
 
-  const event = req.headers.get("x-github-event");
-  if (event !== "issue_comment" && event !== "pull_request_review_comment") {
-    return NextResponse.json({ ok: true, skipped: true });
-  }
-
-  const payload = JSON.parse(body);
-
-  if (payload.action !== "created") {
-    return NextResponse.json({ ok: true, skipped: true });
-  }
-
-  const comment = payload.comment?.body ?? "";
-  if (!comment.startsWith(COMMAND_PREFIX)) {
-    return NextResponse.json({ ok: true, skipped: true });
-  }
-
-  const repoFullName = payload.repository?.full_name;
-  if (!repoFullName) {
-    return NextResponse.json({ error: "No repo" }, { status: 400 });
-  }
-
-  // Parse the command
-  const parsed = parseCommand(comment);
-  if (!parsed) {
-    await postComment(
-      repoFullName,
-      payload.issue?.number ?? payload.pull_request?.number,
-      formatHelp()
-    );
-    return NextResponse.json({ ok: true, replied: "help" });
-  }
-
-  // Create task in Convex
-  try {
-    const issueUrl = payload.issue?.html_url ?? payload.pull_request?.html_url;
-    const issueTitle = payload.issue?.title ?? payload.pull_request?.title ?? "GitHub task";
-    const callerGithubId = String(payload.comment?.user?.id ?? payload.sender?.id);
-    const callerGithubUsername = payload.comment?.user?.login ?? payload.sender?.login ?? "unknown";
-
-    const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL!;
-    const mutationRes = await fetch(`${convexUrl}/api/mutation`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path: "github:createTaskFromGitHub",
-        args: {
-          githubRepoFullName: repoFullName,
-          title: `[${parsed.action}] ${issueTitle}`,
-          prompt: parsed.prompt,
-          category: parsed.category,
-          outputType: parsed.outputType,
-          priority: "normal",
-          githubIssueUrl: issueUrl,
-          githubCommentId: payload.comment?.id,
-          callerGithubId,
-          callerGithubUsername,
-        },
-      }),
-    });
-    if (!mutationRes.ok) {
-      const err = await mutationRes.text();
-      throw new Error(err);
+    const event = req.headers.get("x-github-event");
+    if (event !== "issue_comment" && event !== "pull_request_review_comment") {
+      return NextResponse.json({ ok: true, skipped: true });
     }
 
-    // React to the comment to confirm
-    const reactResult = await reactToComment(repoFullName, payload.comment?.id);
-    const commentResult = await postComment(
+    const payload = JSON.parse(body);
+
+    if (payload.action !== "created") {
+      return NextResponse.json({ ok: true, skipped: true });
+    }
+
+    const comment = payload.comment?.body ?? "";
+    if (!comment.startsWith(COMMAND_PREFIX)) {
+      return NextResponse.json({ ok: true, skipped: true });
+    }
+
+    const repoFullName = payload.repository?.full_name;
+    if (!repoFullName) {
+      return NextResponse.json({ error: "No repo" }, { status: 400 });
+    }
+
+    const callerGithubUsername =
+      payload.comment?.user?.login ?? payload.sender?.login ?? "unknown";
+    const authorized = await isAuthorizedMaintainer(
       repoFullName,
-      payload.issue?.number ?? payload.pull_request?.number,
-      `✅ Task queued — a volunteer will pick this up and run it locally.\n\n**${parsed.action}** → \`${parsed.outputType}\``
+      callerGithubUsername,
+      payload.comment?.author_association
     );
+    if (!authorized) {
+      return NextResponse.json({ ok: true, skipped: "unauthorized-commenter" });
+    }
 
-    return NextResponse.json({ ok: true, taskCreated: true, reactResult, commentResult });
-  } catch (err) {
-    const message = (err as Error).message;
+    const parsed = parseCommand(comment);
+    if (!parsed) {
+      await postComment(
+        repoFullName,
+        payload.issue?.number ?? payload.pull_request?.number,
+        formatHelp()
+      );
+      return NextResponse.json({ ok: true, replied: "help" });
+    }
 
-    await postComment(
-      repoFullName,
-      payload.issue?.number ?? payload.pull_request?.number,
-      `Something went wrong: ${message}`
-    );
+    try {
+      const issueUrl = payload.issue?.html_url ?? payload.pull_request?.html_url;
+      const issueTitle =
+        payload.issue?.title ?? payload.pull_request?.title ?? "GitHub task";
+      const callerGithubId = String(
+        payload.comment?.user?.id ?? payload.sender?.id
+      );
 
-    return NextResponse.json({ error: message }, { status: 400 });
-  }
+      const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL!;
+      const mutationRes = await fetch(`${convexUrl}/api/mutation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: "github:createTaskFromGitHub",
+          args: {
+            githubRepoFullName: repoFullName,
+            title: `[${parsed.action}] ${issueTitle}`,
+            prompt: parsed.prompt,
+            category: parsed.category,
+            outputType: parsed.outputType,
+            priority: "normal",
+            githubIssueUrl: issueUrl,
+            githubCommentId: payload.comment?.id,
+            callerGithubId,
+            callerGithubUsername,
+            webhookSecret: secret,
+          },
+        }),
+      });
+      if (!mutationRes.ok) {
+        const err = await mutationRes.text();
+        throw new Error(err);
+      }
+
+      const reactResult = await reactToComment(
+        repoFullName,
+        payload.comment?.id
+      );
+      const commentResult = await postComment(
+        repoFullName,
+        payload.issue?.number ?? payload.pull_request?.number,
+        `Task queued. A volunteer can approve and run it locally.\n\n**${parsed.action}** -> \`${parsed.outputType}\``
+      );
+
+      return NextResponse.json({
+        ok: true,
+        taskCreated: true,
+        reactResult,
+        commentResult,
+      });
+    } catch (err) {
+      const message = (err as Error).message;
+
+      await postComment(
+        repoFullName,
+        payload.issue?.number ?? payload.pull_request?.number,
+        `Something went wrong: ${message}`
+      );
+
+      return NextResponse.json({ error: message }, { status: 400 });
+    }
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
+}
+
+async function isAuthorizedMaintainer(
+  repo: string,
+  username: string,
+  authorAssociation: string | undefined
+) {
+  if (
+    ["OWNER", "MEMBER", "COLLABORATOR"].includes(authorAssociation ?? "")
+  ) {
+    return true;
+  }
+
+  const token = process.env.GITHUB_APP_TOKEN;
+  if (!token || username === "unknown") return false;
+
+  const res = await fetch(
+    `https://api.github.com/repos/${repo}/collaborators/${username}/permission`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "PromptRelay",
+      },
+    }
+  );
+
+  if (!res.ok) return false;
+
+  const data = (await res.json()) as { permission?: string };
+  return ["admin", "maintain", "write"].includes(data.permission ?? "");
+}
+
+async function verifyGitHubSignature(
+  body: string,
+  signature: string | null,
+  secret: string
+) {
+  if (!signature?.startsWith("sha256=")) return false;
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(body));
+  const expected =
+    "sha256=" +
+    Array.from(new Uint8Array(sig))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+  return signature === expected;
 }
 
 function parseCommand(comment: string): ParsedCommand | null {

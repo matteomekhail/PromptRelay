@@ -1,12 +1,12 @@
 # PromptRelay
 
-A volunteer AI execution network for open-source maintainers.
+A GitHub-native volunteer AI execution network for open-source maintainers.
 
-Maintainers submit public AI tasks (code review, docs, tests, bugfixes). Volunteers manually approve and run those tasks locally using their own AI setup. Results are sent back as answers, reviews, markdown, diffs, or PR drafts.
+Maintainers submit public AI tasks from GitHub issues and pull requests with `/promptrelay` commands. Volunteers approve and run those tasks locally from the PromptRelay CLI/TUI using their own AI setup. Results are sent back as GitHub comments, markdown, diffs, or PRs.
 
 ## Stack
 
-- **Next.js 16** (App Router, TypeScript)
+- **Next.js 16** (API routes and minimal static docs)
 - **Tailwind CSS** + **shadcn/ui** (base-ui)
 - **Convex** (database, backend functions)
 - **Auth.js v5** (NextAuth) with GitHub OAuth
@@ -53,12 +53,14 @@ Required variables:
 - `NEXTAUTH_URL` — `http://localhost:3000` for local dev
 - `NEXT_PUBLIC_APP_URL` — public app URL used as the Convex auth issuer
 - `CONVEX_AUTH_PRIVATE_KEY` — RSA private key used to sign Convex auth JWTs
+- `GITHUB_WEBHOOK_SECRET` — shared secret used by GitHub webhook signature verification and Convex task creation
 
 Convex also needs the auth issuer URL in its deployment environment because
 `convex/auth.config.ts` reads it:
 
 ```bash
 npx convex env set NEXT_PUBLIC_APP_URL http://localhost:3000
+npx convex env set GITHUB_WEBHOOK_SECRET your-webhook-secret
 ```
 
 For the volunteer CLI, also set:
@@ -97,25 +99,25 @@ This creates sample users (with fake GitHub IDs), projects, and queued tasks for
 
 ### Roles
 
-- **Maintainer** — creates projects, submits AI tasks, reviews results
-- **Volunteer** — browses queued tasks, runs them locally, submits results
+- **Maintainer** — creates tasks from GitHub issues/PRs with `/promptrelay`
+- **Volunteer** — reviews queued tasks in the CLI/TUI, runs them locally, submits results
 
 A single account can have both roles.
 
 ### Auth flow
 
-1. User signs in with GitHub via Auth.js
-2. The app exchanges the Auth.js session for a short-lived Convex JWT through `/api/convex/token`
+1. The volunteer CLI signs in with GitHub device flow
+2. The CLI exchanges the GitHub access token for a short-lived Convex JWT through `/api/convex/token`
 3. Convex validates that JWT through the app's OIDC-compatible metadata and JWKS routes
-4. On first authenticated visit, the app upserts a Convex `users` record from `ctx.auth.getUserIdentity()`
-5. User can add Maintainer and/or Volunteer roles at `/onboarding`
+4. On first CLI startup, the CLI upserts a Convex `users` record and grants the Volunteer role
+5. Maintainer identities are created from verified GitHub webhook payloads when they invoke `/promptrelay`
 
 ### Security model
 
 - No provider API keys stored on the server
 - No server-side AI execution
 - Volunteers run tasks locally using their own setup
-- The volunteer daemon only auto-executes tasks from trusted repositories
+- The volunteer daemon only executes tasks from trusted repositories, and requires manual approval unless auto-approve is enabled
 - All role and ownership checks happen via server-side Convex identity, not client-supplied user IDs
 - GitHub identity is the only auth source
 
@@ -123,13 +125,17 @@ A single account can have both roles.
 
 The CLI includes a deterministic mock executor (`packages/cli/src/executors/mock.ts`) that generates realistic content based on the task's output type. No external AI APIs are called when the mock executor is selected.
 
-## Routes
+## Web Surface
+
+PromptRelay is not intended to have a maintainer dashboard. The web app exists
+for static documentation and machine endpoints:
 
 | Route | Description |
 |-------|-------------|
-| `/` | Landing page |
-| `/onboarding` | Role selection |
-| `/tasks/[id]` | Task detail + results |
+| `/api/github/webhook` | GitHub slash-command webhook |
+| `/api/convex/token` | GitHub token/session to Convex JWT bridge |
+| `/api/convex/jwks` | JWKS for Convex auth |
+| `/.well-known/openid-configuration` | OIDC metadata for Convex auth |
 
 ## Volunteer CLI Settings
 
@@ -144,8 +150,8 @@ Run the daemon explicitly with `promptrelay start`, or use
 
 ## MVP Limitations
 
-- Maintainer project/task creation UI is not implemented yet
-- No GitHub App integration
+- No maintainer web UI by design; GitHub is the maintainer interface
+- GitHub App integration is still minimal and currently expects a configured webhook secret plus GitHub token
 - CLI execution is restricted to trusted repositories by default
 - Public/open-source content only
 
