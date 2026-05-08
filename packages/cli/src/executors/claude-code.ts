@@ -10,6 +10,7 @@ import { isUnsafeExecutionAllowed } from "../config.js";
 const execAsync = promisify(exec);
 
 const REPOS_DIR = join(homedir(), ".promptrelay", "repos");
+const DEFAULT_EXECUTION_TIMEOUT_MS = 300_000;
 
 export class ClaudeCodeExecutor implements Executor {
   name = "claude-code";
@@ -252,6 +253,11 @@ export class ClaudeCodeExecutor implements Executor {
       let stderr = "";
       let lastFlush = 0;
       let settled = false;
+      const timeoutMs = Number(
+        process.env.PROMPTRELAY_EXECUTION_TIMEOUT_MS ?? DEFAULT_EXECUTION_TIMEOUT_MS
+      );
+
+      child.stdin.end();
 
       child.stdout.on("data", (chunk: Buffer) => {
         output += chunk.toString();
@@ -270,8 +276,8 @@ export class ClaudeCodeExecutor implements Executor {
         if (settled) return;
         settled = true;
         child.kill();
-        reject(new Error("Claude Code timed out (10 min)"));
-      }, 600_000);
+        reject(new Error(`Claude Code timed out (${Math.round(timeoutMs / 1000)}s)`));
+      }, timeoutMs);
 
       child.on("close", (code) => {
         if (settled) return;

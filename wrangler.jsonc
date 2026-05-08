@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "NEXT_PUBLIC_APP_URL": "https://promptrelay.dev",
+    "PROMPTRELAY_CONVEX_URL": "https://successful-ox-560.convex.cloud",
     "NEXT_PUBLIC_CONVEX_URL": "https://successful-ox-560.convex.cloud",
     "NEXT_PUBLIC_CONVEX_SITE_URL": "https://successful-ox-560.convex.site",
     "NEXTAUTH_URL": "https://promptrelay.dev"

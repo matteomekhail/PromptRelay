@@ -112,7 +112,13 @@ export async function POST(req: NextRequest) {
         payload.comment?.user?.id ?? payload.sender?.id
       );
 
-      const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL!;
+      const convexUrl =
+        process.env.PROMPTRELAY_CONVEX_URL ??
+        process.env.NEXT_PUBLIC_CONVEX_URL;
+      if (!convexUrl) {
+        throw new Error("Convex URL is not configured");
+      }
+
       const mutationRes = await fetch(`${convexUrl}/api/mutation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
