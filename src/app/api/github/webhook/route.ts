@@ -133,9 +133,19 @@ export async function POST(req: NextRequest) {
           },
         }),
       });
+      const mutationText = await mutationRes.text();
       if (!mutationRes.ok) {
-        const err = await mutationRes.text();
-        throw new Error(err);
+        throw new Error(mutationText);
+      }
+
+      const mutationPayload = JSON.parse(mutationText) as {
+        status?: string;
+        errorMessage?: string;
+      };
+      if (mutationPayload.status === "error") {
+        throw new Error(
+          mutationPayload.errorMessage ?? "Convex task creation failed"
+        );
       }
 
       const reactResult = await reactToComment(
