@@ -11,7 +11,9 @@ import { commitAndOpenForkPullRequest } from "./github-pr.js";
 const execAsync = promisify(exec);
 
 const REPOS_DIR = join(homedir(), ".promptrelay", "repos");
-const DEFAULT_EXECUTION_TIMEOUT_MS = 300_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
+const PROCESS_PROGRESS_POLL_MS = 5_000;
+const WORKTREE_PROGRESS_POLL_MS = 15_000;
 
 export class ClaudeCodeExecutor implements Executor {
   name = "claude-code";
@@ -180,15 +182,90 @@ export class ClaudeCodeExecutor implements Executor {
       let output = "";
       let stderr = "";
       let lastFlush = 0;
+      let lastProcessTime: string | null = null;
+      let lastWorktreeStatus: string | null = null;
+      let checkingProcess = false;
+      let checkingWorktree = false;
       let settled = false;
-      const timeoutMs = Number(
-        process.env.PROMPTRELAY_EXECUTION_TIMEOUT_MS ?? DEFAULT_EXECUTION_TIMEOUT_MS
+      const idleTimeoutMs = Number(
+        process.env.PROMPTRELAY_IDLE_TIMEOUT_MS ??
+          process.env.PROMPTRELAY_EXECUTION_TIMEOUT_MS ??
+          DEFAULT_IDLE_TIMEOUT_MS
       );
+      let idleTimeout: NodeJS.Timeout;
 
       child.stdin.end();
 
+      const stopChild = () => {
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) child.kill("SIGKILL");
+        }, 5_000).unref();
+      };
+
+      const resetIdleTimer = () => {
+        clearTimeout(idleTimeout);
+        idleTimeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          clearInterval(processPoll);
+          clearInterval(worktreePoll);
+          stopChild();
+          reject(
+            new Error(
+              `Claude Code made no progress for ${Math.round(idleTimeoutMs / 1000)}s`
+            )
+          );
+        }, idleTimeoutMs);
+      };
+
+      const worktreePoll = setInterval(() => {
+        if (settled || checkingWorktree) return;
+        checkingWorktree = true;
+        execAsync("git status --porcelain", { cwd, shell: "/bin/zsh" })
+          .then(({ stdout }) => {
+            if (lastWorktreeStatus === null) {
+              lastWorktreeStatus = stdout;
+              return;
+            }
+            if (stdout !== lastWorktreeStatus) {
+              lastWorktreeStatus = stdout;
+              resetIdleTimer();
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            checkingWorktree = false;
+          });
+      }, WORKTREE_PROGRESS_POLL_MS);
+      const processPoll = setInterval(() => {
+        if (settled || checkingProcess || !child.pid) return;
+        checkingProcess = true;
+        execAsync(`ps -o time= -p ${child.pid}`, { shell: "/bin/zsh" })
+          .then(({ stdout }) => {
+            const processTime = stdout.trim();
+            if (!processTime) return;
+            if (lastProcessTime === null) {
+              lastProcessTime = processTime;
+              return;
+            }
+            if (processTime !== lastProcessTime) {
+              lastProcessTime = processTime;
+              resetIdleTimer();
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            checkingProcess = false;
+          });
+      }, PROCESS_PROGRESS_POLL_MS);
+      worktreePoll.unref();
+      processPoll.unref();
+      resetIdleTimer();
+
       child.stdout.on("data", (chunk: Buffer) => {
         output += chunk.toString();
+        resetIdleTimer();
         const now = Date.now();
         if (this.onStream && now - lastFlush > 500) {
           lastFlush = now;
@@ -198,19 +275,15 @@ export class ClaudeCodeExecutor implements Executor {
 
       child.stderr.on("data", (chunk: Buffer) => {
         stderr += chunk.toString();
+        resetIdleTimer();
       });
-
-      const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        child.kill();
-        reject(new Error(`Claude Code timed out (${Math.round(timeoutMs / 1000)}s)`));
-      }, timeoutMs);
 
       child.on("close", (code) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        clearTimeout(idleTimeout);
+        clearInterval(processPoll);
+        clearInterval(worktreePoll);
         if (this.onStream) this.onStream(output);
         if (code === 0 || code === null) {
           resolve(output.trim());
@@ -223,7 +296,9 @@ export class ClaudeCodeExecutor implements Executor {
       child.on("error", (err) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
+        clearTimeout(idleTimeout);
+        clearInterval(processPoll);
+        clearInterval(worktreePoll);
         reject(new Error(`Claude Code spawn error: ${err.message}`));
       });
     });

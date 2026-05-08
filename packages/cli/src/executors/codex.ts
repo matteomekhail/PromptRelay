@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -11,6 +11,9 @@ import { commitAndOpenForkPullRequest } from "./github-pr.js";
 const execAsync = promisify(exec);
 
 const REPOS_DIR = join(homedir(), ".promptrelay", "repos");
+const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
+const PROCESS_PROGRESS_POLL_MS = 5_000;
+const WORKTREE_PROGRESS_POLL_MS = 15_000;
 
 export class CodexExecutor implements Executor {
   name = "codex";
@@ -83,19 +86,10 @@ export class CodexExecutor implements Executor {
     await this.ensureBranch(workDir, branchName);
 
     const prompt = this.buildPrompt(task);
-    const escapedPrompt = prompt.replace(/'/g, "'\\''");
     const codexBin = await this.findCodexBin();
 
     try {
-      const { stdout } = await execAsync(
-        `${this.codexCommand(codexBin)} '${escapedPrompt}'`,
-        {
-          cwd: workDir,
-          timeout: 300_000,
-          shell: "/bin/zsh",
-          env: this.toolEnv(),
-        }
-      );
+      const stdout = await this.runCodex(codexBin, prompt, workDir);
 
       const hasChanges = await this.hasChanges(workDir);
       const prUrl = hasChanges
@@ -179,6 +173,140 @@ export class CodexExecutor implements Executor {
     return isUnsafeExecutionAllowed()
       ? `'${codexBin}' exec --dangerously-bypass-approvals-and-sandbox`
       : `'${codexBin}' exec --ask-for-approval never --sandbox workspace-write`;
+  }
+
+  private codexArgs(prompt: string): string[] {
+    return isUnsafeExecutionAllowed()
+      ? ["exec", "--dangerously-bypass-approvals-and-sandbox", prompt]
+      : ["exec", "--ask-for-approval", "never", "--sandbox", "workspace-write", prompt];
+  }
+
+  private async runCodex(
+    codexBin: string,
+    prompt: string,
+    cwd: string
+  ): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(codexBin, this.codexArgs(prompt), {
+        cwd,
+        env: this.toolEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let lastProcessTime: string | null = null;
+      let lastWorktreeStatus: string | null = null;
+      let checkingProcess = false;
+      let checkingWorktree = false;
+      let settled = false;
+      const idleTimeoutMs = Number(
+        process.env.PROMPTRELAY_IDLE_TIMEOUT_MS ??
+          process.env.PROMPTRELAY_EXECUTION_TIMEOUT_MS ??
+          DEFAULT_IDLE_TIMEOUT_MS
+      );
+      let idleTimeout: NodeJS.Timeout;
+
+      const stopChild = () => {
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) child.kill("SIGKILL");
+        }, 5_000).unref();
+      };
+
+      const resetIdleTimer = () => {
+        clearTimeout(idleTimeout);
+        idleTimeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          clearInterval(processPoll);
+          clearInterval(worktreePoll);
+          stopChild();
+          reject(
+            new Error(
+              `Codex made no progress for ${Math.round(idleTimeoutMs / 1000)}s`
+            )
+          );
+        }, idleTimeoutMs);
+      };
+
+      const worktreePoll = setInterval(() => {
+        if (settled || checkingWorktree) return;
+        checkingWorktree = true;
+        execAsync("git status --porcelain", { cwd, shell: "/bin/zsh" })
+          .then(({ stdout: status }) => {
+            if (lastWorktreeStatus === null) {
+              lastWorktreeStatus = status;
+              return;
+            }
+            if (status !== lastWorktreeStatus) {
+              lastWorktreeStatus = status;
+              resetIdleTimer();
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            checkingWorktree = false;
+          });
+      }, WORKTREE_PROGRESS_POLL_MS);
+      const processPoll = setInterval(() => {
+        if (settled || checkingProcess || !child.pid) return;
+        checkingProcess = true;
+        execAsync(`ps -o time= -p ${child.pid}`, { shell: "/bin/zsh" })
+          .then(({ stdout }) => {
+            const processTime = stdout.trim();
+            if (!processTime) return;
+            if (lastProcessTime === null) {
+              lastProcessTime = processTime;
+              return;
+            }
+            if (processTime !== lastProcessTime) {
+              lastProcessTime = processTime;
+              resetIdleTimer();
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            checkingProcess = false;
+          });
+      }, PROCESS_PROGRESS_POLL_MS);
+      worktreePoll.unref();
+      processPoll.unref();
+      resetIdleTimer();
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+        resetIdleTimer();
+      });
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+        resetIdleTimer();
+      });
+
+      child.on("close", (code) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(idleTimeout);
+        clearInterval(processPoll);
+        clearInterval(worktreePoll);
+        if (code === 0 || code === null) {
+          resolve(stdout);
+        } else {
+          const detail = stderr.trim() ? `: ${stderr.trim().slice(-1000)}` : "";
+          reject(new Error(`Codex exited with code ${code}${detail}`));
+        }
+      });
+
+      child.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(idleTimeout);
+        clearInterval(processPoll);
+        clearInterval(worktreePoll);
+        reject(new Error(`Codex spawn error: ${err.message}`));
+      });
+    });
   }
 
   private async assertCleanWorktree(workDir: string): Promise<void> {
