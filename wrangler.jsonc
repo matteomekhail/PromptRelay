@@ -4,6 +4,12 @@
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://promptrelay.dev",
+    "NEXT_PUBLIC_CONVEX_URL": "https://successful-ox-560.convex.cloud",
+    "NEXT_PUBLIC_CONVEX_SITE_URL": "https://successful-ox-560.convex.site",
+    "NEXTAUTH_URL": "https://promptrelay.dev"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
