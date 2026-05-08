@@ -3,7 +3,7 @@ import type { ProviderConfig } from "./executors/types.js";
 
 const PRODUCTION_APP_URL = "https://promptrelay.dev";
 const PRODUCTION_CONVEX_URL = "https://successful-ox-560.convex.cloud";
-export const SUPPORTED_PROVIDERS = ["claude-code", "codex"] as const;
+export const SUPPORTED_PROVIDERS = ["claude-code", "codex", "opencode"] as const;
 
 export interface VolunteerConfig {
   githubToken?: string;
@@ -32,6 +32,7 @@ const defaults: VolunteerConfig = {
   providers: [
     { provider: "claude-code", enabled: true },
     { provider: "codex", enabled: true },
+    { provider: "opencode", enabled: true },
   ],
   autoApprove: false,
   trustedProjects: [],

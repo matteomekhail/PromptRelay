@@ -1,12 +1,14 @@
 import type { Executor } from "./types.js";
 import { ClaudeCodeExecutor } from "./claude-code.js";
 import { CodexExecutor } from "./codex.js";
+import { OpenCodeExecutor } from "./opencode.js";
 
 export type { Executor, TaskPayload, ExecutionResult, ProviderConfig } from "./types.js";
 
 const ALL_EXECUTORS: Executor[] = [
   new ClaudeCodeExecutor(),
   new CodexExecutor(),
+  new OpenCodeExecutor(),
 ];
 
 export function getExecutor(name: string): Executor | undefined {

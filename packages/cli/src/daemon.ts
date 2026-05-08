@@ -194,7 +194,7 @@ export class Daemon {
       const payload = this.toPayload(task);
       const executors = await this.getExecutionCandidates(task, enabledProviders);
       if (executors.length === 0) {
-        throw new Error("No available Claude Code or Codex executor");
+        throw new Error("No available executor (Claude Code, Codex, or OpenCode)");
       }
 
       if (!task.acceptedCommentPostedAt) {

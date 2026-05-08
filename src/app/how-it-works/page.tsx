@@ -69,6 +69,10 @@ export default function HowItWorksPage() {
             <code className="text-foreground font-mono text-[13px]">
               codex --quiet --approval-mode full-auto {"<"}prompt{">"}
             </code>
+            , or the OpenCode equivalent:{" "}
+            <code className="text-foreground font-mono text-[13px]">
+              opencode run --dangerously-skip-permissions {"<"}prompt{">"}
+            </code>
             ) as a child process inside the cloned repo. The executor gets a
             basic system prompt explaining that the repo is already cloned, that
             it should follow the maintainer&apos;s prompt, and that PromptRelay will
