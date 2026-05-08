@@ -2,6 +2,8 @@ import { ConvexClient } from "convex/browser";
 import { ConvexHttpClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
 import { exec } from "node:child_process";
+import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +15,8 @@ import { openForkPullRequest } from "./executors/github-pr.js";
 import type { Executor, ExecutionResult, TaskPayload } from "./executors/types.js";
 
 const execAsync = promisify(exec);
+const REPOS_DIR = join(homedir(), ".promptrelay", "repos");
+const STASHES_DIR = join(homedir(), ".promptrelay", "stashes");
 
 interface QueuedTask {
   _id: string;
@@ -39,6 +43,11 @@ interface RecoveredTask {
 interface DirtyWorktree {
   path: string;
   status: string;
+}
+
+interface SavedWorktreeSnapshot {
+  path: string;
+  statusPath: string;
 }
 
 interface DaemonCallbacks {
@@ -224,13 +233,18 @@ export class Daemon {
           errors.push(message);
           const dirtyWorktree = await this.getDirtyWorktree(task);
           if (dirtyWorktree) {
+            const snapshot = await this.saveWorktreeSnapshot(task, dirtyWorktree);
             const error = [
               message,
               "",
               "PromptRelay stopped this task because the provider left partial local changes.",
-              "The task will not be retried or handed to another provider until the worktree is inspected or cleaned.",
+              "The task will not be retried or handed to another provider.",
               "",
-              `Worktree: ${dirtyWorktree.path}`,
+              snapshot
+                ? `Partial changes saved: ${snapshot.path}`
+                : "Partial changes could not be saved.",
+              snapshot ? `Status saved: ${snapshot.statusPath}` : "",
+              `Temporary worktree cleanup: ${dirtyWorktree.path}`,
               "",
               "Changed files:",
               dirtyWorktree.status,
@@ -278,6 +292,7 @@ export class Daemon {
       this.callbacks.onTaskCompleted?.(task, result.durationMs);
     } finally {
       stopHeartbeat();
+      await this.cleanupTaskWorktree(task);
     }
   }
 
@@ -498,12 +513,7 @@ export class Daemon {
     const repo = this.repoSlug(task.publicRepoUrl);
     if (!repo) return null;
 
-    const path = join(
-      homedir(),
-      ".promptrelay",
-      "repos",
-      repo.replace("/", "__")
-    );
+    const path = this.localRepoPath(repo);
 
     try {
       const { stdout } = await execAsync("git status --porcelain", {
@@ -515,6 +525,69 @@ export class Daemon {
     } catch {
       return null;
     }
+  }
+
+  private localRepoPath(repo: string): string {
+    return join(REPOS_DIR, repo.replace("/", "__"));
+  }
+
+  private async saveWorktreeSnapshot(
+    task: QueuedTask,
+    dirtyWorktree: DirtyWorktree
+  ): Promise<SavedWorktreeSnapshot | null> {
+    if (!this.isManagedWorktree(dirtyWorktree.path)) return null;
+
+    const repo = task.publicRepoUrl ? this.repoSlug(task.publicRepoUrl) : null;
+    const repoLabel = (repo ?? "repo").replace(/[^a-zA-Z0-9_.-]/g, "__");
+    const taskLabel = task._id.replace(/[^a-zA-Z0-9_.-]/g, "-");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const dir = join(STASHES_DIR, repoLabel);
+    const patchPath = join(dir, `${stamp}-${taskLabel}.patch`);
+    const statusPath = join(dir, `${stamp}-${taskLabel}.status.txt`);
+
+    try {
+      await mkdir(dir, { recursive: true });
+      await execAsync("git add -N .", {
+        cwd: dirtyWorktree.path,
+        shell: "/bin/zsh",
+        maxBuffer: 1024 * 1024 * 10,
+      }).catch(() => {});
+      const { stdout: patch } = await execAsync("git diff --binary HEAD --", {
+        cwd: dirtyWorktree.path,
+        shell: "/bin/zsh",
+        maxBuffer: 1024 * 1024 * 50,
+      });
+      await writeFile(patchPath, patch, "utf8");
+      await writeFile(statusPath, dirtyWorktree.status + "\n", "utf8");
+      return { path: patchPath, statusPath };
+    } catch (err) {
+      this.callbacks.onError?.(
+        new Error(`Failed to save partial worktree patch: ${(err as Error).message}`)
+      );
+      return null;
+    }
+  }
+
+  private async cleanupTaskWorktree(task: QueuedTask): Promise<void> {
+    if (!task.publicRepoUrl) return;
+
+    const repo = this.repoSlug(task.publicRepoUrl);
+    if (!repo) return;
+
+    const path = this.localRepoPath(repo);
+    if (!this.isManagedWorktree(path) || !existsSync(path)) return;
+
+    try {
+      await rm(path, { recursive: true, force: true });
+    } catch (err) {
+      this.callbacks.onError?.(
+        new Error(`Failed to remove temporary worktree ${path}: ${(err as Error).message}`)
+      );
+    }
+  }
+
+  private isManagedWorktree(path: string): boolean {
+    return path === REPOS_DIR || path.startsWith(`${REPOS_DIR}/`);
   }
 
   private toPayload(task: QueuedTask): TaskPayload {
