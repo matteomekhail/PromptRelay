@@ -232,26 +232,23 @@ export class Daemon {
   private async postResultToIssue(task: QueuedTask, content: string): Promise<void> {
     if (!task.githubIssueUrl) return;
 
-    const match = task.githubIssueUrl.match(
-      /github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/(\d+)/
-    );
-    if (!match) return;
-
-    const [, repo, issueNumber] = match;
     const config = getConfig();
-    const token = config.githubPat ?? config.githubToken;
-    if (!token) return;
+    if (!config.appUrl) return;
+    if (!this.authToken) await this.refreshAuth();
 
-    const body = `## PromptRelay — ${task.category}\n\n${content}`;
-
-    const res = await fetch(`https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`, {
+    const res = await fetch(`${config.appUrl.replace(/\/$/, "")}/api/github/result`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${this.authToken}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
         "User-Agent": "PromptRelay",
       },
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({
+        githubIssueUrl: task.githubIssueUrl,
+        category: task.category,
+        content,
+      }),
     });
 
     if (!res.ok) {

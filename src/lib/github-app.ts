@@ -34,6 +34,28 @@ export async function createGitHubInstallationToken(
   return data.token;
 }
 
+export async function createGitHubInstallationTokenForRepo(repo: string) {
+  const appJwt = await createGitHubAppJwt();
+  const res = await fetch(`https://api.github.com/repos/${repo}/installation`, {
+    headers: {
+      Authorization: `Bearer ${appJwt}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      "User-Agent": "PromptRelay",
+    },
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    id?: number;
+    message?: string;
+  };
+  if (!res.ok || !data.id) {
+    throw new Error(data.message ?? "Could not find GitHub App installation");
+  }
+
+  return await createGitHubInstallationToken(data.id);
+}
+
 async function createGitHubAppJwt() {
   const appId = process.env.GITHUB_APP_ID;
   if (!appId) throw new Error("GITHUB_APP_ID is not configured");

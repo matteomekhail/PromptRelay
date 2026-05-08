@@ -1,5 +1,5 @@
 import { createPrivateKey, createPublicKey } from "node:crypto";
-import { SignJWT, importPKCS8 } from "jose";
+import { SignJWT, importPKCS8, jwtVerify } from "jose";
 
 export type ConvexTokenUser = {
   githubId: string;
@@ -72,6 +72,14 @@ export async function createConvexAuthToken(user: ConvexTokenUser) {
     .setIssuedAt()
     .setExpirationTime(`${TOKEN_TTL_SECONDS}s`)
     .sign(privateKey);
+}
+
+export async function verifyConvexAuthToken(token: string) {
+  const publicKey = createPublicKey(createPrivateKey(getPrivateKey()));
+  return await jwtVerify(token, publicKey, {
+    issuer: getConvexAuthIssuer(),
+    audience: TOKEN_AUDIENCE,
+  });
 }
 
 function getPrivateKey() {
