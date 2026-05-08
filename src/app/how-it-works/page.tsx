@@ -5,7 +5,7 @@ export default function HowItWorksPage() {
         How it works
       </h1>
 
-      <p className="mt-6 text-[15px] leading-7 text-muted-foreground max-w-[38rem]">
+      <p className="mt-6 text-[15px] leading-7 text-muted-foreground max-w-152">
         PromptRelay coordinates AI execution between maintainers and
         volunteers. GitHub is the maintainer interface; the volunteer CLI/TUI is
         the execution interface. The platform never touches provider
