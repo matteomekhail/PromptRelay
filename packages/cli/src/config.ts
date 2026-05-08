@@ -1,6 +1,9 @@
 import Conf from "conf";
 import type { ProviderConfig } from "./executors/types.js";
 
+const PRODUCTION_APP_URL = "https://promptrelay.dev";
+const PRODUCTION_CONVEX_URL = "https://successful-ox-560.convex.cloud";
+
 export interface VolunteerConfig {
   githubToken?: string;
   githubId?: string;
@@ -18,10 +21,8 @@ export interface VolunteerConfig {
 }
 
 const defaults: VolunteerConfig = {
-  convexUrl:
-    process.env.PROMPTRELAY_CONVEX_URL ??
-    "https://successful-ox-560.convex.cloud",
-  appUrl: process.env.PROMPTRELAY_APP_URL ?? "https://promptrelay.dev",
+  convexUrl: process.env.PROMPTRELAY_CONVEX_URL ?? PRODUCTION_CONVEX_URL,
+  appUrl: process.env.PROMPTRELAY_APP_URL ?? PRODUCTION_APP_URL,
   maxTasksPerDay: 10,
   allowedCategories: ["docs", "tests", "bugfix", "review", "refactor", "translation"],
   providers: [
