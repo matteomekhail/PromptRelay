@@ -169,6 +169,7 @@ export class Daemon {
     }
 
     this.callbacks.onTaskRunning?.(task, executor.displayName);
+    await this.postTaskAcceptedToIssue(task, executor.displayName);
     this.callbacks.onTaskPreview?.(
       task,
       executor.displayName,
@@ -227,6 +228,42 @@ export class Daemon {
 
     this.tasksCompletedToday++;
     this.callbacks.onTaskCompleted?.(task, result.durationMs);
+  }
+
+  private async postTaskAcceptedToIssue(
+    task: QueuedTask,
+    provider: string
+  ): Promise<void> {
+    if (!task.githubIssueUrl) return;
+
+    const config = getConfig();
+    if (!config.appUrl) return;
+    if (!this.authToken) await this.refreshAuth();
+
+    const res = await fetch(
+      `${config.appUrl.replace(/\/$/, "")}/api/github/task-status`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.authToken}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": "PromptRelay",
+        },
+        body: JSON.stringify({
+          githubIssueUrl: task.githubIssueUrl,
+          event: "accepted",
+          title: task.title,
+          provider,
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      this.callbacks.onError?.(
+        new Error(`Failed to post task acceptance: ${res.status}`)
+      );
+    }
   }
 
   private async postResultToIssue(task: QueuedTask, content: string): Promise<void> {
