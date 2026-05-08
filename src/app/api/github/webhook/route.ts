@@ -24,6 +24,12 @@ type GitHubWebhookPayload = {
   pull_request?: { number?: number; title?: string; html_url?: string };
 };
 
+type GitHubIssueComment = {
+  id?: number;
+  body?: string;
+  user?: { login?: string; type?: string };
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
@@ -95,9 +101,29 @@ export async function POST(req: NextRequest) {
       const issueUrl = payload.issue?.html_url ?? payload.pull_request?.html_url;
       const issueTitle =
         payload.issue?.title ?? payload.pull_request?.title ?? "GitHub task";
+      const issueNumber = payload.issue?.number ?? payload.pull_request?.number;
+      const issueBody =
+        getStringField(payload.issue, "body") ??
+        getStringField(payload.pull_request, "body") ??
+        "";
       const callerGithubId = String(
         payload.comment?.user?.id ?? payload.sender?.id
       );
+      const recentComments = await fetchRecentIssueComments(
+        repoFullName,
+        issueNumber,
+        payload.comment?.id,
+        installationToken
+      );
+      const taskPrompt = formatTaskPrompt({
+        repoFullName,
+        issueNumber,
+        issueTitle,
+        issueBody,
+        issueUrl,
+        maintainerInstruction: parsed.prompt,
+        recentComments,
+      });
 
       const convexUrl =
         process.env.PROMPTRELAY_CONVEX_URL ??
@@ -114,7 +140,7 @@ export async function POST(req: NextRequest) {
           args: {
             githubRepoFullName: repoFullName,
             title: issueTitle,
-            prompt: parsed.prompt,
+            prompt: taskPrompt,
             priority: "normal",
             githubIssueUrl: issueUrl,
             githubCommentId: payload.comment?.id,
@@ -147,7 +173,7 @@ export async function POST(req: NextRequest) {
       const commentResult = await postComment(
         repoFullName,
         payload.issue?.number ?? payload.pull_request?.number,
-        "Task queued. A volunteer can approve and run it locally.",
+        "Queued. A volunteer CLI will pick this up.",
         installationToken
       );
 
@@ -172,6 +198,99 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
+}
+
+async function fetchRecentIssueComments(
+  repo: string,
+  issueNumber: number | undefined,
+  currentCommentId: number | undefined,
+  token: string
+): Promise<GitHubIssueComment[]> {
+  if (!issueNumber) return [];
+
+  const res = await fetch(
+    `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments?per_page=10`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "PromptRelay",
+      },
+    }
+  );
+  if (!res.ok) return [];
+
+  const comments = (await res.json()) as GitHubIssueComment[];
+  return comments
+    .filter((comment) => comment.id !== currentCommentId)
+    .filter((comment) => comment.body?.trim())
+    .slice(-6);
+}
+
+function formatTaskPrompt({
+  repoFullName,
+  issueNumber,
+  issueTitle,
+  issueBody,
+  issueUrl,
+  maintainerInstruction,
+  recentComments,
+}: {
+  repoFullName: string;
+  issueNumber?: number;
+  issueTitle: string;
+  issueBody: string;
+  issueUrl?: string;
+  maintainerInstruction: string;
+  recentComments: GitHubIssueComment[];
+}) {
+  const body = issueBody.trim() || "No description provided.";
+  const discussion = recentComments
+    .map((comment) => {
+      const author = comment.user?.login ?? "unknown";
+      return `- ${author}: ${truncate(cleanPromptRelayNoise(comment.body ?? ""), 900)}`;
+    })
+    .filter((line) => !line.endsWith(": "))
+    .join("\n");
+
+  return [
+    "Use the GitHub issue context below to understand references like \"this\", \"it\", or \"the above\".",
+    "",
+    "Repository:",
+    repoFullName,
+    "",
+    "Issue:",
+    `${issueNumber ? `#${issueNumber} ` : ""}${issueTitle}`,
+    issueUrl ? `URL: ${issueUrl}` : "",
+    "",
+    "Issue description:",
+    truncate(body, 1800),
+    discussion ? "\nRecent discussion:" : "",
+    discussion,
+    "",
+    "Maintainer instruction:",
+    maintainerInstruction,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function cleanPromptRelayNoise(body: string) {
+  return body
+    .replace(/^Queued\. A volunteer CLI will pick this up\.\s*$/i, "")
+    .replace(/^Task queued\. A volunteer can approve and run it locally\.\s*$/i, "")
+    .trim();
+}
+
+function truncate(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength).trim()}...`;
+}
+
+function getStringField(value: unknown, field: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const fieldValue = (value as Record<string, unknown>)[field];
+  return typeof fieldValue === "string" ? fieldValue : undefined;
 }
 
 async function isAuthorizedMaintainer(

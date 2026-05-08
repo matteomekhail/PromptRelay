@@ -141,6 +141,24 @@ export const markRunning = mutation({
   },
 });
 
+export const markAcceptedCommentPosted = mutation({
+  args: {
+    taskId: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireCurrentUser(ctx);
+
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.claimedByVolunteerId !== user._id) throw new Error("Not your task");
+
+    await ctx.db.patch(args.taskId, {
+      acceptedCommentPostedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const complete = mutation({
   args: {
     taskId: v.id("tasks"),

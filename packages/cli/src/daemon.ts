@@ -19,6 +19,7 @@ interface QueuedTask {
   preferredProvider?: string;
   preferredModel?: string;
   status: string;
+  acceptedCommentPostedAt?: number;
 }
 
 interface DaemonCallbacks {
@@ -165,11 +166,19 @@ export class Daemon {
       throw new Error("No available Claude Code or Codex executor");
     }
 
+    if (!task.acceptedCommentPostedAt) {
+      const posted = await this.postTaskAcceptedToIssue(task);
+      if (posted) {
+        await this.mutation("tasks:markAcceptedCommentPosted", {
+          taskId: task._id,
+        });
+      }
+    }
+
     let result: ExecutionResult | null = null;
     const errors: string[] = [];
     for (const executor of executors) {
       this.callbacks.onTaskRunning?.(task, executor.displayName);
-      await this.postTaskAcceptedToIssue(task, executor.displayName);
       this.callbacks.onTaskPreview?.(
         task,
         executor.displayName,
@@ -248,14 +257,11 @@ export class Daemon {
     return fallback ? [fallback] : [];
   }
 
-  private async postTaskAcceptedToIssue(
-    task: QueuedTask,
-    provider: string
-  ): Promise<void> {
-    if (!task.githubIssueUrl) return;
+  private async postTaskAcceptedToIssue(task: QueuedTask): Promise<boolean> {
+    if (!task.githubIssueUrl) return false;
 
     const config = getConfig();
-    if (!config.appUrl) return;
+    if (!config.appUrl) return false;
     if (!this.authToken) await this.refreshAuth();
 
     const res = await fetch(
@@ -272,7 +278,6 @@ export class Daemon {
           githubIssueUrl: task.githubIssueUrl,
           event: "accepted",
           title: task.title,
-          provider,
         }),
       }
     );
@@ -281,7 +286,9 @@ export class Daemon {
       this.callbacks.onError?.(
         new Error(`Failed to post task acceptance: ${res.status}`)
       );
+      return false;
     }
+    return true;
   }
 
   private async postResultToIssue(task: QueuedTask, content: string): Promise<void> {

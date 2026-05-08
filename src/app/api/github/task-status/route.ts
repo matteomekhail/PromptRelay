@@ -8,7 +8,6 @@ type TaskStatusPayload = {
   githubIssueUrl?: string;
   event?: "accepted";
   title?: string;
-  provider?: string;
 };
 
 export async function POST(req: NextRequest) {
@@ -35,7 +34,6 @@ export async function POST(req: NextRequest) {
     );
     const volunteer = getVolunteerUsername(verified.payload);
     const body = formatAcceptedComment({
-      provider: payload.provider,
       title: payload.title,
       volunteer,
     });
@@ -84,19 +82,15 @@ function getVolunteerUsername(payload: Record<string, unknown>) {
 }
 
 function formatAcceptedComment({
-  provider,
   title,
   volunteer,
 }: {
-  provider?: string;
   title?: string;
   volunteer: string;
 }) {
   const runner = volunteer === "a volunteer" ? volunteer : `@${volunteer}`;
   const lines = [
-    "Task accepted.",
-    "",
-    `${runner} is running this locally with the PromptRelay CLI${provider ? ` using ${provider}` : ""}.`,
+    `Picked up by ${runner}.`,
   ];
 
   if (title) {

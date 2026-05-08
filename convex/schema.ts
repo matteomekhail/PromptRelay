@@ -58,6 +58,7 @@ export default defineSchema({
     attempts: v.optional(v.number()),
     failedReason: v.optional(v.string()),
     streamingContent: v.optional(v.string()),
+    acceptedCommentPostedAt: v.optional(v.number()),
     executedByProvider: v.optional(v.string()),
     executedByModel: v.optional(v.string()),
     executionDurationMs: v.optional(v.number()),
