@@ -1,0 +1,4 @@
+<svg width="256" height="256" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PromptRelay">
+  <path fill="#EFE3D1" fill-rule="evenodd" clip-rule="evenodd" d="M8 12h9.25L30 24 17.25 36H8l12.25-12L8 12Zm8.15 5.65h2.55L25.38 24 18.7 30.35h-2.55L22.85 24l-6.7-6.35Z"/>
+  <rect x="33.5" y="12" width="6.5" height="24" rx="1.25" fill="#EFE3D1"/>
+</svg>
